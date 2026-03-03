@@ -774,7 +774,12 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
     }
   }
 
-  void _startReading({int sortNum = 1}) async {
+  void _startReading({
+    int sortNum = 1,
+    // 用户从详情页明确点选章节进入阅读器时，必须尊重用户意图：不要让阅读器用服务端进度重定向回“继续阅读”的章节。
+    // 仅在“继续阅读/恢复阅读”的入口才允许阅读器在首次打开时做一次服务端对齐。
+    bool allowServerOverrideOnOpen = false,
+  }) async {
     // 强制写入 SharedPreferences，确保立刻启动的 ReaderPage 无论如何都能读到最新的合法进度
     if (_readPosition != null && _readPosition!.sortNum == sortNum) {
       await _progressService.saveLocalPosition(
@@ -804,6 +809,7 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
                   totalChapters: _bookInfo!.chapters.length,
                   coverUrl: coverUrl,
                   bookTitle: _bookInfo?.title ?? widget.initialTitle,
+                  allowServerOverrideOnOpen: allowServerOverrideOnOpen,
                 ),
           ),
         )
@@ -856,7 +862,7 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
     }
 
     final sortNum = _readPosition?.sortNum ?? 1;
-    _startReading(sortNum: sortNum);
+    _startReading(sortNum: sortNum, allowServerOverrideOnOpen: true);
   }
 
   /// 显示同步未完成警告弹窗
@@ -908,7 +914,10 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
                 onTap: () {
                   Navigator.pop(context);
                   final sortNum = _readPosition?.sortNum ?? 1;
-                  _startReading(sortNum: sortNum);
+                  _startReading(
+                    sortNum: sortNum,
+                    allowServerOverrideOnOpen: true,
+                  );
                 },
               ),
               ListTile(

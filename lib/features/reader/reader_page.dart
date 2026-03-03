@@ -92,6 +92,9 @@ class ReaderPage extends ConsumerStatefulWidget {
   final int totalChapters;
   final String? coverUrl; // 封面 URL（用于动态取色）
   final String? bookTitle; // 新增：书籍标题
+  // 是否允许在“进入阅读器”这一刻用服务端进度覆盖章节号并重定向。
+  // 仅适用于继续阅读/恢复阅读等场景；用户从详情页主动点选章节进入时必须为 false。
+  final bool allowServerOverrideOnOpen;
 
   const ReaderPage({
     super.key,
@@ -100,6 +103,7 @@ class ReaderPage extends ConsumerStatefulWidget {
     required this.totalChapters,
     this.coverUrl,
     this.bookTitle,
+    this.allowServerOverrideOnOpen = false,
   });
 
   @override
@@ -244,7 +248,13 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
     _scrollController.addListener(_onScroll);
     _targetSortNum = widget.sortNum; // 初始化目标章节号
-    _loadChapter(widget.bid, widget.sortNum);
+    // 首次进入阅读器：允许用服务端进度进行一次“极速对齐”（避免详情页缓存/多端阅读导致初始章节不准）
+    // 之后的手动切章必须绝对尊重用户意图，因此后续调用默认禁用该对齐逻辑。
+    _loadChapter(
+      widget.bid,
+      widget.sortNum,
+      allowServerOverride: widget.allowServerOverrideOnOpen,
+    );
     // 开始记录阅读时长
     _readingTimeService.startSession();
 
@@ -610,7 +620,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     return completer.future;
   }
 
-  Future<void> _loadChapter(int bid, int sortNum) async {
+  Future<void> _loadChapter(
+    int bid,
+    int sortNum, {
+    bool allowServerOverride = false,
+  }) async {
     _logger.info('Requesting chapter with SortNum: $sortNum...');
 
     // 版本号递增，用于打断旧请求
@@ -642,10 +656,14 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         convert: settings.convertType == 'none' ? null : settings.convertType,
       );
 
-      final bookInfoFuture = _bookService
-          .getBookInfo(bid)
-          .then<BookInfo?>((v) => v)
-          .catchError((_) => null);
+      // 仅在允许服务端覆盖时才请求 BookInfo（避免手动切章时被云端进度强制重定向回当前章）
+      final bookInfoFuture =
+          allowServerOverride
+              ? _bookService
+                  .getBookInfo(bid)
+                  .then<BookInfo?>((v) => v)
+                  .catchError((_) => null)
+              : Future.value(null);
 
       final results = await Future.wait([contentFuture, bookInfoFuture]);
       final chapter = results[0] as ChapterContent;
@@ -659,8 +677,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         return;
       }
 
-      // 进度极速防伪核对
-      if (info != null &&
+      // 进度极速防伪核对：仅允许在“首次进入阅读器/恢复阅读”的场景覆盖章节号。
+      // 手动切章（上一章/下一章/章节列表）必须禁用 override/redirect，否则会出现永远回到同一章的现象。
+      if (allowServerOverride &&
+          info != null &&
           info.serverReadPosition != null &&
           info.serverReadPosition!.chapterId != null) {
         final serverChapterId = info.serverReadPosition!.chapterId!;
@@ -704,7 +724,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                 setState(() {
                   _targetSortNum = serverSortNum!;
                 });
-                _loadChapter(bid, serverSortNum);
+                // 只允许对齐一次，避免递归重定向/覆盖用户后续意图
+                _loadChapter(bid, serverSortNum, allowServerOverride: false);
               }
               return;
             }
@@ -775,17 +796,20 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                 'Chapter loaded, saved position to sync with server',
               );
             } else {
-              // 布局未完成但章节已加载，至少同步章节信息
+              // 布局未完成但章节已加载：不要写入/上传虚假的 scroll:0.0000，避免污染服务端精确 XPath。
+              // 使用当前已知的 topVisibleXPath（restore 可能已提前设置），至少保证章节信息正确。
+              final xPath = _getTopVisibleXPath();
+
               await _progressService.saveLocalPosition(
                 bookId: widget.bid,
                 chapterId: _chapter!.id,
                 sortNum: _chapter!.sortNum,
-                xPath: 'scroll:0.0000',
+                xPath: xPath,
               );
               await _progressService.saveReadPosition(
                 bookId: widget.bid,
                 chapterId: _chapter!.id,
-                xPath: 'scroll:0.0000',
+                xPath: xPath,
               );
               _logger.info(
                 'Chapter loaded (no scroll), saved ch${_chapter!.sortNum} to sync',
@@ -813,6 +837,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       setState(() {
         _targetSortNum--;
       });
+      // 手动切章：必须禁用服务端章节覆盖/重定向
       _loadChapter(widget.bid, _targetSortNum);
     } else {
       ScaffoldMessenger.of(
@@ -826,6 +851,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       setState(() {
         _targetSortNum++;
       });
+      // 手动切章：必须禁用服务端章节覆盖/重定向
       _loadChapter(widget.bid, _targetSortNum);
     } else {
       ScaffoldMessenger.of(
