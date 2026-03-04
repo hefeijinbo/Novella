@@ -143,6 +143,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   bool _initialScrollDone = false;
   bool _barsVisible = true;
 
+  // 边界自动展示菜单栏：仅在“首次到达边界”时触发，避免在章节开头/结尾无法手动收起
+  bool _edgeInitialized = false;
+  bool _wasAtTop = false;
+  bool _wasAtBottom = false;
+
   // 基于封面的动态配色
   ColorScheme? _dynamicColorScheme;
 
@@ -630,9 +635,21 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
     _readProgressNotifier.value = progress.clamp(0.0, 1.0);
 
-    // 边界自动显示菜单栏（仅从隐藏→显示）
-    if ((atTop || atBottom) && !_barsVisible) {
-      _toggleBars();
+    // 边界自动显示菜单栏：
+    // 仅在“进入边界”的瞬间触发，避免用户在章节开头/结尾无法手动收起
+    if (!_edgeInitialized) {
+      _edgeInitialized = true;
+      _wasAtTop = atTop;
+      _wasAtBottom = atBottom;
+    } else {
+      final enteredTop = atTop && !_wasAtTop;
+      final enteredBottom = atBottom && !_wasAtBottom;
+      _wasAtTop = atTop;
+      _wasAtBottom = atBottom;
+
+      if ((enteredTop || enteredBottom) && !_barsVisible) {
+        _toggleBars();
+      }
     }
 
     // 防抖保存（闲置 2 秒）
@@ -910,6 +927,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       _loading = true;
       _error = null;
       _initialScrollDone = false;
+
+      // 重置边界状态：新章节首次到边界时可自动展示一次菜单栏
+      _edgeInitialized = false;
+      _wasAtTop = false;
+      _wasAtBottom = false;
 
       // 重置渲染内容与脚注缓存，避免短暂显示上一章的注释映射
       _footnoteNotesById = const {};
