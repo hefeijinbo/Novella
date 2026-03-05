@@ -156,8 +156,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
   // ========== 逻辑进度（Route B） ==========
   // 逻辑进度 0..1（加权，避免依赖像素滚动）
-  final ValueNotifier<double> _readProgressNotifier =
-      ValueNotifier<double>(0.0);
+  final ValueNotifier<double> _readProgressNotifier = ValueNotifier<double>(
+    0.0,
+  );
 
   // 当前顶端可见 block index
   int _topVisibleBlockIndex = 0;
@@ -169,8 +170,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   _ReaderBlocksBuildResult? _blocksResult;
 
   // 布局信息缓存（避免 build 期间反复 parse）
-  _ReaderLayoutInfo _layoutInfo =
-      const _ReaderLayoutInfo(_ReaderLayoutMode.standard);
+  _ReaderLayoutInfo _layoutInfo = const _ReaderLayoutInfo(
+    _ReaderLayoutMode.standard,
+  );
 
   // 图片宽高比缓存，key: srcUrl, value: 宽高比 (width/height)
   // 用于懒加载中维持插画的绝对原比例高度占位
@@ -361,7 +363,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     return text.isNotEmpty || hasImg;
   }
 
-  double _computeBlockWeight({required int textLength, required int imageCount}) {
+  double _computeBlockWeight({
+    required int textLength,
+    required int imageCount,
+  }) {
     final raw = textLength.toDouble() + (imageCount * _kImageWeight);
     return raw < _kMinBlockWeight ? _kMinBlockWeight : raw;
   }
@@ -471,14 +476,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       return const _ReaderLayoutInfo(_ReaderLayoutMode.standard);
     }
 
-    final totalImages = blocks.fold<int>(
-      0,
-      (sum, b) => sum + b.imageCount,
-    );
-    final totalText = blocks.fold<int>(
-      0,
-      (sum, b) => sum + b.textLength,
-    );
+    final totalImages = blocks.fold<int>(0, (sum, b) => sum + b.imageCount);
+    final totalText = blocks.fold<int>(0, (sum, b) => sum + b.textLength);
 
     // 居中：仅一张图且无文本
     if (totalImages == 1 && totalText == 0 && blocks.length == 1) {
@@ -806,7 +805,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       );
     }
     WidgetsBinding.instance.removeObserver(this);
-    _itemPositionsListener.itemPositions.removeListener(_onItemPositionsChanged);
+    _itemPositionsListener.itemPositions.removeListener(
+      _onItemPositionsChanged,
+    );
     _readProgressNotifier.dispose();
     _infoTimer?.cancel();
     _batteryLevelNotifier.dispose();
@@ -884,8 +885,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       'xPath=${position?.xPath}, blocks=${result.blocks.length}',
     );
 
-    if (position != null &&
-        position.sortNum == _chapter?.sortNum) {
+    if (position != null && position.sortNum == _chapter?.sortNum) {
       if (position.xPath.startsWith('scroll:')) {
         final targetPos =
             double.tryParse(position.xPath.replaceAll('scroll:', '')) ?? 0.0;
@@ -1158,11 +1158,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         builder: (context) {
           final isDark = Theme.of(context).brightness == Brightness.dark;
 
-           // ignore: deprecated_member_use
-           return WillPopScope(
-             onWillPop: _onWillPop,
-             child: AnnotatedRegion<SystemUiOverlayStyle>(
-value: SystemUiOverlayStyle(
+          // ignore: deprecated_member_use
+          return WillPopScope(
+            onWillPop: _onWillPop,
+            child: AnnotatedRegion<SystemUiOverlayStyle>(
+              value: SystemUiOverlayStyle(
                 statusBarColor:
                     Colors.transparent, // 顶部状态栏透明（由 SoftEdgeBlur 接管视觉）
                 statusBarIconBrightness:
@@ -1441,9 +1441,7 @@ value: SystemUiOverlayStyle(
 
             // 如果已经有了真实比例缓存，我们就用真实比例
             // 如果尚无真实比例，则暂时不使用外包裹高度防止拉伸（因为 ImageStream 正在后台加载并会在不久后触发 setState）
-            Widget indicator = Container(
-              color: readerTextColor.withValues(alpha: 0.05),
-              alignment: Alignment.center,
+            Widget indicator = Center(
               child:
                   isError
                       ? Column(
@@ -1478,11 +1476,11 @@ value: SystemUiOverlayStyle(
             builder: (context, setState) {
               final isShown = _shownImages.contains(src);
 
-               // Route B：正文已虚拟化（仅构建视口附近 blocks），此处不再需要额外的 VisibilityDetector。
-               // 直接展示图片（CachedNetworkImage 自带异步加载与占位），同时保留比例占位以稳定布局。
-               if (!isShown) {
-                 _shownImages.add(src);
-               }
+              // Route B：正文已虚拟化（仅构建视口附近 blocks），此处不再需要额外的 VisibilityDetector。
+              // 直接展示图片（CachedNetworkImage 自带异步加载与占位），同时保留比例占位以稳定布局。
+              if (!isShown) {
+                _shownImages.add(src);
+              }
 
               // 显示之后，返回原本的网络图片容器
               return CachedNetworkImage(
@@ -1540,22 +1538,37 @@ value: SystemUiOverlayStyle(
           return const Center(child: M3ELoadingIndicator());
         }
 
+        // 单张图居中模式：不走 ScrollablePositionedList（无界高度下 Align 无法垂直居中），
+        // 直接用视口高度 + Center 实现真正的垂直居中。
+        if (layoutInfo.mode == _ReaderLayoutMode.center && blocks.length == 1) {
+          return SizedBox(
+            height: constraints.maxHeight,
+            child: Center(
+              child: HtmlWidget(
+                blocks.first.html,
+                textStyle: TextStyle(
+                  fontFamily: _fontFamily,
+                  fontSize: settings.fontSize,
+                  height: 1.6,
+                  color: readerTextColor,
+                ),
+                customStylesBuilder: customStylesBuilder,
+                customWidgetBuilder: customWidgetBuilder,
+              ),
+            ),
+          );
+        }
+
         return ScrollablePositionedList.builder(
           itemScrollController: _itemScrollController,
           itemPositionsListener: _itemPositionsListener,
           itemCount: blocks.length,
-          padding:
-              layoutInfo.mode == _ReaderLayoutMode.center
-                  ? EdgeInsets.zero
-                  : padding,
+          padding: padding,
           itemBuilder: (context, index) {
             final block = blocks[index];
 
             return Align(
-              alignment:
-                  layoutInfo.mode == _ReaderLayoutMode.center
-                      ? Alignment.center
-                      : Alignment.topCenter,
+              alignment: Alignment.topCenter,
               child: HtmlWidget(
                 block.html,
                 textStyle: TextStyle(
@@ -1975,9 +1988,9 @@ value: SystemUiOverlayStyle(
                                         final batteryState =
                                             _batteryStateNotifier.value;
 
-                                        final widthFactor =
-                                            (batteryLevel / 100.0)
-                                                .clamp(0.0, 1.0);
+                                        final widthFactor = (batteryLevel /
+                                                100.0)
+                                            .clamp(0.0, 1.0);
 
                                         final barColor = () {
                                           if (batteryState ==
@@ -2002,8 +2015,9 @@ value: SystemUiOverlayStyle(
                                             color: subTextColor.withValues(
                                               alpha: 0.2,
                                             ),
-                                            borderRadius:
-                                                BorderRadius.circular(3),
+                                            borderRadius: BorderRadius.circular(
+                                              3,
+                                            ),
                                           ),
                                           alignment: Alignment.centerLeft,
                                           child: FractionallySizedBox(
