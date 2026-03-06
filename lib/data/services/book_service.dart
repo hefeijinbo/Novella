@@ -101,10 +101,13 @@ class BookService {
           ],
         );
 
-        allBooks.addAll(result.map((e) => Book.fromJson(e)).toList());
+        // 过滤 null 元素（服务端对权限受限书籍可能返回 null）
+        allBooks.addAll(
+          result.whereType<Map<dynamic, dynamic>>().map((e) => Book.fromJson(e)).toList(),
+        );
       } catch (e) {
         _logger.severe('Failed to get books chunk $i-$end: $e');
-        rethrow;
+        // 跳过失败分块，继续处理其他分块
       }
     }
 
