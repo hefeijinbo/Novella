@@ -179,6 +179,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
   // 图片懒加载记录：记录某个 url 是否曾经进入过视口
   final Set<String> _shownImages = {};
+  final Map<String, String> _indentedBlockHtmlCache = {};
 
   SharedPreferences? _prefs;
 
@@ -294,6 +295,124 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
   }
 
   // ==================== Route B：block 构建/定位/进度 ====================
+
+  String _getRenderedBlockHtml(_ReaderBlock block, AppSettings settings) {
+    if (!settings.readerFirstLineIndent) {
+      return block.html;
+    }
+
+    final cacheKey = '${_chapter?.id ?? 0}:${block.xPath}';
+    return _indentedBlockHtmlCache.putIfAbsent(
+      cacheKey,
+      () => _applyFirstLineIndent(block.html),
+    );
+  }
+
+  String _applyFirstLineIndent(String html) {
+    if (html.isEmpty) {
+      return html;
+    }
+
+    try {
+      final fragment = html_parser.parseFragment(html);
+      if (fragment.nodes.isEmpty) {
+        return html;
+      }
+
+      final root = fragment.nodes.firstWhere(
+        (node) => node is dom.Element,
+        orElse: () => fragment.nodes.first,
+      );
+      if (root is! dom.Element || !_canApplyFirstLineIndent(root)) {
+        return html;
+      }
+
+      final firstTextNode = _findFirstIndentableTextNode(root);
+      if (firstTextNode == null) {
+        return html;
+      }
+
+      firstTextNode.text = _prependFirstLineIndent(firstTextNode.text);
+      return _serializeFragmentNodes(fragment.nodes);
+    } catch (_) {
+      return html;
+    }
+  }
+
+  String _serializeFragmentNodes(List<dom.Node> nodes) {
+    final buffer = StringBuffer();
+    for (final node in nodes) {
+      if (node is dom.Element) {
+        buffer.write(node.outerHtml);
+      } else if (node is dom.Text) {
+        buffer.write(node.text);
+      }
+    }
+    return buffer.toString();
+  }
+
+  bool _canApplyFirstLineIndent(dom.Element element) {
+    const indentableTags = {'p', 'div', 'blockquote'};
+    if (!indentableTags.contains(element.localName)) {
+      return false;
+    }
+    if (element.getElementsByTagName('img').isNotEmpty) {
+      return false;
+    }
+
+    final rawText = element.text.replaceAll('\u200B', '').trim();
+    if (rawText.isEmpty) {
+      return false;
+    }
+
+    final align = (element.attributes['align'] ?? '').toLowerCase();
+    final style = (element.attributes['style'] ?? '').toLowerCase();
+    if (align == 'center' || align == 'right') {
+      return false;
+    }
+    if (style.contains('text-align:center') ||
+        style.contains('text-align: center') ||
+        style.contains('text-align:right') ||
+        style.contains('text-align: right') ||
+        element.classes.contains('center')) {
+      return false;
+    }
+
+    return true;
+  }
+
+  dom.Text? _findFirstIndentableTextNode(dom.Node node) {
+    if (node is dom.Text) {
+      return node.text.replaceAll('\u200B', '').trim().isEmpty ? null : node;
+    }
+    if (node is! dom.Element) {
+      return null;
+    }
+    if (node.localName == 'img' || node.localName == 'hr') {
+      return null;
+    }
+
+    for (final child in node.nodes) {
+      final textNode = _findFirstIndentableTextNode(child);
+      if (textNode != null) {
+        return textNode;
+      }
+    }
+
+    return null;
+  }
+
+  String _prependFirstLineIndent(String text) {
+    final trimmedLeft = text.trimLeft();
+    if (trimmedLeft.isEmpty || trimmedLeft.startsWith('\u3000\u3000')) {
+      return text;
+    }
+
+    final leadingLength = text.length - trimmedLeft.length;
+    final leadingWhitespace =
+        leadingLength > 0 ? text.substring(0, leadingLength) : '';
+    return '$leadingWhitespace\u3000\u3000$trimmedLeft';
+  }
 
   static const double _kImageWeight = 280.0;
   static const double _kMinBlockWeight = 1.0;
@@ -1062,6 +1181,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           _layoutInfo = layoutInfo;
           _loading = false;
           _shownImages.clear(); // 新层清空曾经看过的图
+          _indentedBlockHtmlCache.clear();
           _topVisibleBlockIndex = 0;
           _lastTopVisibleXPath =
               blocksResult.blocks.isNotEmpty
@@ -1200,6 +1320,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     // 获取阅读背景色和文字色
     final readerBackgroundColor = _getReaderBackgroundColor(settings);
     final readerTextColor = _getReaderTextColor(settings);
+    final readerLineHeight = settings.readerLineHeight;
 
     // Route B：布局信息在加载章节时基于 blocks 预计算并缓存，避免 build 时反复 parse。
     final layoutInfo = _layoutInfo;
@@ -1302,6 +1423,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           'padding-left': '16px',
           'padding-right': '16px',
           'margin-bottom': '1em',
+          'line-height': readerLineHeight.toStringAsFixed(1),
           'text-align': 'left', // 强制左对齐
         };
 
@@ -1314,7 +1436,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       }
 
       if (element.localName == 'body') {
-        return {'margin': '0', 'padding': '0', 'line-height': '1.6'};
+        return {
+          'margin': '0',
+          'padding': '0',
+          'line-height': readerLineHeight.toStringAsFixed(1),
+        };
       }
       return null;
     }
@@ -1341,6 +1467,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           footnoteId: footnoteId,
           noteHtml: noteHtml,
           baseFontSize: settings.fontSize,
+          lineHeight: readerLineHeight,
           fontFamily: _fontFamily,
           readerBackgroundColor: readerBackgroundColor,
           readerTextColor: readerTextColor,
@@ -1530,15 +1657,16 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         // 单张图居中模式：不走 ScrollablePositionedList（无界高度下 Align 无法垂直居中），
         // 直接用视口高度 + Center 实现真正的垂直居中。
         if (layoutInfo.mode == _ReaderLayoutMode.center && blocks.length == 1) {
+          final blockHtml = _getRenderedBlockHtml(blocks.first, settings);
           return SizedBox(
             height: constraints.maxHeight,
             child: Center(
               child: HtmlWidget(
-                blocks.first.html,
+                blockHtml,
                 textStyle: TextStyle(
                   fontFamily: _fontFamily,
                   fontSize: settings.fontSize,
-                  height: 1.6,
+                  height: readerLineHeight,
                   color: readerTextColor,
                 ),
                 customStylesBuilder: customStylesBuilder,
@@ -1557,15 +1685,16 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
             padding: padding,
             itemBuilder: (context, index) {
               final block = blocks[index];
+              final blockHtml = _getRenderedBlockHtml(block, settings);
 
               return Align(
                 alignment: Alignment.topCenter,
                 child: HtmlWidget(
-                  block.html,
+                  blockHtml,
                   textStyle: TextStyle(
                     fontFamily: _fontFamily,
                     fontSize: settings.fontSize,
-                    height: 1.6,
+                    height: readerLineHeight,
                     color: readerTextColor,
                   ),
                   customStylesBuilder: customStylesBuilder,
@@ -2526,6 +2655,7 @@ class _FootnoteAnchor extends StatefulWidget {
   final String footnoteId;
   final String? noteHtml;
   final double baseFontSize;
+  final double lineHeight;
   final String? fontFamily;
   final Color readerBackgroundColor;
   final Color readerTextColor;
@@ -2535,6 +2665,7 @@ class _FootnoteAnchor extends StatefulWidget {
     required this.footnoteId,
     required this.noteHtml,
     required this.baseFontSize,
+    required this.lineHeight,
     required this.fontFamily,
     required this.readerBackgroundColor,
     required this.readerTextColor,
@@ -2735,7 +2866,7 @@ class _FootnoteAnchorState extends State<_FootnoteAnchor>
               textStyle: TextStyle(
                 fontFamily: widget.fontFamily,
                 fontSize: (widget.baseFontSize * 0.95).clamp(12.0, 18.0),
-                height: 1.5,
+                height: widget.lineHeight,
                 color: widget.readerTextColor,
               ),
               customStylesBuilder: (element) {
@@ -2775,7 +2906,7 @@ class _FootnoteAnchorState extends State<_FootnoteAnchor>
               style: TextStyle(
                 fontFamily: widget.fontFamily,
                 fontSize: (widget.baseFontSize * 0.95).clamp(12.0, 18.0),
-                height: 1.5,
+                height: widget.lineHeight,
                 color: widget.readerTextColor.withValues(alpha: 0.7),
               ),
             );

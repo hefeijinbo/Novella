@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:novella/features/settings/settings_provider.dart';
-import 'package:novella/features/settings/widgets/settings_ui_helper.dart';
-
 import 'package:novella/features/settings/widgets/settings_header_card.dart';
+import 'package:novella/features/settings/widgets/settings_ui_helper.dart';
 
 class ReadingSettingsPage extends ConsumerWidget {
   const ReadingSettingsPage({super.key});
@@ -21,12 +20,11 @@ class ReadingSettingsPage extends ConsumerWidget {
             child: SettingsHeaderCard(
               icon: Icons.menu_book,
               title: '阅读设置',
-              subtitle: '管理排版与阅读习惯',
+              subtitle: '管理排版样式与阅读习惯',
             ),
           ),
           SliverList(
             delegate: SliverChildListDelegate([
-              // 字体大小
               ListTile(
                 leading: const Icon(Icons.text_fields),
                 title: const Text('字体大小'),
@@ -43,8 +41,22 @@ class ReadingSettingsPage extends ConsumerWidget {
                   ),
                 ),
               ),
-
-              // 繁简转换
+              ListTile(
+                leading: const Icon(Icons.format_line_spacing),
+                title: const Text('行间距'),
+                subtitle: Text(settings.readerLineHeight.toStringAsFixed(1)),
+                trailing: SizedBox(
+                  width: 200,
+                  child: Slider(
+                    value: settings.readerLineHeight,
+                    min: 1.2,
+                    max: 2.4,
+                    divisions: 12,
+                    label: settings.readerLineHeight.toStringAsFixed(1),
+                    onChanged: (value) => notifier.setReaderLineHeight(value),
+                  ),
+                ),
+              ),
               ListTile(
                 leading: const Icon(Icons.translate),
                 title: const Text('繁简转换'),
@@ -52,7 +64,7 @@ class ReadingSettingsPage extends ConsumerWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      const {'none': '关闭', 't2s': '繁→简', 's2t': '简→繁'}[settings
+                      const {'none': '关闭', 't2s': '繁转简', 's2t': '简转繁'}[settings
                               .convertType] ??
                           '关闭',
                       style: TextStyle(
@@ -69,7 +81,7 @@ class ReadingSettingsPage extends ConsumerWidget {
                       title: '繁简转换',
                       subtitle: '阅读时自动转换文字',
                       currentValue: settings.convertType,
-                      options: const {'none': '关闭', 't2s': '繁→简', 's2t': '简→繁'},
+                      options: const {'none': '关闭', 't2s': '繁转简', 's2t': '简转繁'},
                       icons: const {
                         'none': Icons.close,
                         't2s': Icons.arrow_circle_down_outlined,
@@ -78,16 +90,13 @@ class ReadingSettingsPage extends ConsumerWidget {
                       onSelected: (value) => notifier.setConvertType(value),
                     ),
               ),
-
-              // 显示章节序号
               SwitchListTile(
-                secondary: const Icon(Icons.format_list_numbered),
-                title: const Text('显示章节序号'),
-                value: settings.showChapterNumber,
-                onChanged: (value) => notifier.setShowChapterNumber(value),
+                secondary: const Icon(Icons.format_indent_increase),
+                title: const Text('首行缩进'),
+                subtitle: const Text('为段落开头添加两个全角空格'),
+                value: settings.readerFirstLineIndent,
+                onChanged: (value) => notifier.setReaderFirstLineIndent(value),
               ),
-
-              // 简化续读按钮的章节标题
               SwitchListTile(
                 secondary: const Icon(Icons.auto_fix_high),
                 title: const Text('简化章节标题'),

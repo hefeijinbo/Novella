@@ -11,10 +11,11 @@ import 'package:novella/data/services/book_info_cache_service.dart';
 /// 设置状态模型
 class AppSettings {
   final double fontSize;
+  final bool readerFirstLineIndent;
+  final double readerLineHeight;
   final String theme; // 'system'（系统）, 'light'（浅色）, 'dark'（深色）
   final String version; // App 版本号
   final String convertType; // 'none'（关闭）, 't2s'（繁转简）, 's2t'（简转繁）
-  final bool showChapterNumber;
   final bool fontCacheEnabled;
   final int fontCacheLimit; // 10-60
   final String homeRankType; // 'daily'（日）, 'weekly'（周）, 'monthly'（月）
@@ -66,10 +67,11 @@ class AppSettings {
 
   const AppSettings({
     this.fontSize = 18.0,
+    this.readerFirstLineIndent = false,
+    this.readerLineHeight = 1.6,
     this.theme = 'system',
     this.version = '', // 默认空，加载后更新
     this.convertType = 'none',
-    this.showChapterNumber = true,
     this.fontCacheEnabled = true,
     this.fontCacheLimit = 30,
     this.homeRankType = 'weekly',
@@ -106,10 +108,11 @@ class AppSettings {
 
   AppSettings copyWith({
     double? fontSize,
+    bool? readerFirstLineIndent,
+    double? readerLineHeight,
     String? theme,
     String? version,
     String? convertType,
-    bool? showChapterNumber,
     bool? fontCacheEnabled,
     int? fontCacheLimit,
     String? homeRankType,
@@ -139,10 +142,12 @@ class AppSettings {
   }) {
     return AppSettings(
       fontSize: fontSize ?? this.fontSize,
+      readerFirstLineIndent:
+          readerFirstLineIndent ?? this.readerFirstLineIndent,
+      readerLineHeight: readerLineHeight ?? this.readerLineHeight,
       theme: theme ?? this.theme,
       version: version ?? this.version,
       convertType: convertType ?? this.convertType,
-      showChapterNumber: showChapterNumber ?? this.showChapterNumber,
       fontCacheEnabled: fontCacheEnabled ?? this.fontCacheEnabled,
       fontCacheLimit: fontCacheLimit ?? this.fontCacheLimit,
       homeRankType: homeRankType ?? this.homeRankType,
@@ -205,10 +210,12 @@ class SettingsNotifier extends Notifier<AppSettings> {
     );
     state = AppSettings(
       fontSize: prefs.getDouble('setting_fontSize') ?? 18.0,
+      readerFirstLineIndent:
+          prefs.getBool('setting_readerFirstLineIndent') ?? false,
+      readerLineHeight: prefs.getDouble('setting_readerLineHeight') ?? 1.6,
       theme: prefs.getString('setting_theme') ?? 'system',
       version: packageInfo.version,
       convertType: prefs.getString('setting_convertType') ?? 'none',
-      showChapterNumber: prefs.getBool('setting_showChapterNumber') ?? true,
       fontCacheEnabled: prefs.getBool('setting_fontCacheEnabled') ?? true,
       fontCacheLimit: prefs.getInt('setting_fontCacheLimit') ?? 30,
       homeRankType: prefs.getString('setting_homeRankType') ?? 'weekly',
@@ -264,9 +271,13 @@ class SettingsNotifier extends Notifier<AppSettings> {
   Future<void> _save() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble('setting_fontSize', state.fontSize);
+    await prefs.setBool(
+      'setting_readerFirstLineIndent',
+      state.readerFirstLineIndent,
+    );
+    await prefs.setDouble('setting_readerLineHeight', state.readerLineHeight);
     await prefs.setString('setting_theme', state.theme);
     await prefs.setString('setting_convertType', state.convertType);
-    await prefs.setBool('setting_showChapterNumber', state.showChapterNumber);
     await prefs.setBool('setting_fontCacheEnabled', state.fontCacheEnabled);
     await prefs.setInt('setting_fontCacheLimit', state.fontCacheLimit);
     await prefs.setString('setting_homeRankType', state.homeRankType);
@@ -327,6 +338,16 @@ class SettingsNotifier extends Notifier<AppSettings> {
     _save();
   }
 
+  void setReaderFirstLineIndent(bool value) {
+    state = state.copyWith(readerFirstLineIndent: value);
+    _save();
+  }
+
+  void setReaderLineHeight(double value) {
+    state = state.copyWith(readerLineHeight: value.clamp(1.2, 2.4).toDouble());
+    _save();
+  }
+
   void setTheme(String theme) {
     state = state.copyWith(theme: theme);
     _save();
@@ -337,11 +358,6 @@ class SettingsNotifier extends Notifier<AppSettings> {
 
   void setConvertType(String type) {
     state = state.copyWith(convertType: type);
-    _save();
-  }
-
-  void setShowChapterNumber(bool show) {
-    state = state.copyWith(showChapterNumber: show);
     _save();
   }
 
