@@ -207,6 +207,10 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     return _currentFrontendPage < maxPages;
   }
 
+  bool get _shouldShowPagination {
+    return _allValidBooks.length > _pageSize || !_hasReachedEnd;
+  }
+
   Widget _buildPagination() {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
@@ -437,7 +441,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             }, childCount: displayBooks.length),
           ),
         ),
-        if (_allValidBooks.isNotEmpty)
+        if (_shouldShowPagination)
           SliverToBoxAdapter(child: _buildPagination()),
         SliverToBoxAdapter(
           child: SizedBox(height: MediaQuery.paddingOf(context).bottom),

@@ -56,6 +56,44 @@ class _BookCoverImageState extends State<BookCoverImage> {
     });
   }
 
+  Widget _buildBasePlaceholder(ColorScheme colorScheme, String? blurHash) {
+    if (blurHash != null) {
+      return BlurHash(
+        hash: blurHash,
+        imageFit: widget.fit,
+        decodingWidth: 32,
+        decodingHeight: 48,
+        color: Colors.transparent,
+      );
+    }
+
+    return Container(
+      color: colorScheme.surfaceContainerHighest,
+      child: Center(
+        child: Icon(Icons.book_outlined, color: colorScheme.onSurfaceVariant),
+      ),
+    );
+  }
+
+  Widget _buildLoadingPlaceholder(ColorScheme colorScheme, String? blurHash) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        _buildBasePlaceholder(colorScheme, blurHash),
+        if (widget.showLoading)
+          Center(
+            child: M3ELoadingIndicator(
+              color:
+                  blurHash != null
+                      ? Colors.white.withValues(alpha: 0.8)
+                      : colorScheme.onSurfaceVariant,
+              size: 20,
+            ),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -65,80 +103,48 @@ class _BookCoverImageState extends State<BookCoverImage> {
     return SizedBox(
       width: widget.width,
       height: widget.height,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // 底层：BlurHash 占位（或纯色回退）
-          if (blurHash != null)
-            BlurHash(
-              hash: blurHash,
-              imageFit: widget.fit,
-              decodingWidth: 32,
-              decodingHeight: 48,
-              color: Colors.transparent,
-            )
-          else
-            Container(
-              color: colorScheme.surfaceContainerHighest,
-              child: Center(
-                child: Icon(
-                  Icons.book_outlined,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          // 上层：真实图片
-          CachedNetworkImage(
-            key: ValueKey('${widget.imageUrl}_$_retryCount'),
-            imageUrl: widget.imageUrl,
-            fit: widget.fit,
-            memCacheWidth: widget.memCacheWidth,
-            memCacheHeight: widget.memCacheHeight,
-            fadeInDuration: widget.fadeInDuration,
-            placeholder:
-                (_, __) =>
-                    widget.showLoading
-                        ? Center(
-                          child: M3ELoadingIndicator(
-                            color:
-                                blurHash != null
-                                    ? Colors.white.withValues(alpha: 0.8)
-                                    : colorScheme.onSurfaceVariant,
-                            size: 20,
-                          ),
-                        )
-                        : const SizedBox.shrink(),
-            errorWidget: (_, __, ___) {
-              // 出错时自动重试一次
-              if (_retryCount == 0) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  _retry();
-                });
-              }
+      child: CachedNetworkImage(
+        key: ValueKey('${widget.imageUrl}_$_retryCount'),
+        imageUrl: widget.imageUrl,
+        fit: widget.fit,
+        memCacheWidth: widget.memCacheWidth,
+        memCacheHeight: widget.memCacheHeight,
+        fadeInDuration: widget.fadeInDuration,
+        placeholder: (_, __) => _buildLoadingPlaceholder(colorScheme, blurHash),
+        errorWidget: (_, __, ___) {
+          // 出错时自动重试一次
+          if (_retryCount == 0) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _retry();
+            });
+          }
 
-              return GestureDetector(
-                onTap: _retry, // 暴露给用户手动点击的二次机制
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  // 有 BlurHash 时底衬透明且只加薄遮罩层以透出 BlurHash
+          return GestureDetector(
+            onTap: _retry, // 暴露给用户手动点击的二次机制
+            behavior: HitTestBehavior.opaque,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                _buildBasePlaceholder(colorScheme, blurHash),
+                Container(
                   color:
                       blurHash != null
                           ? Colors.black.withValues(alpha: 0.15)
-                          : colorScheme.surfaceContainerHighest,
-                  child: Center(
-                    child: Icon(
-                      Icons.broken_image_outlined,
-                      color:
-                          blurHash != null
-                              ? Colors.white.withValues(alpha: 0.75)
-                              : colorScheme.onSurfaceVariant,
-                    ),
+                          : Colors.transparent,
+                ),
+                Center(
+                  child: Icon(
+                    Icons.broken_image_outlined,
+                    color:
+                        blurHash != null
+                            ? Colors.white.withValues(alpha: 0.75)
+                            : colorScheme.onSurfaceVariant,
                   ),
                 ),
-              );
-            },
-          ),
-        ],
+              ],
+            ),
+          );
+        },
       ),
     );
   }

@@ -105,19 +105,24 @@ class ShelfItem {
   });
 
   factory ShelfItem.fromJson(Map<dynamic, dynamic> json) {
-    final typeStr = json['type'] as String? ?? 'BOOK';
+    final typeStr = (json['type'] ?? json['Type']) as String? ?? 'BOOK';
     final type =
         typeStr == 'FOLDER' ? ShelfItemType.folder : ShelfItemType.book;
 
     return ShelfItem(
-      id: json['id'], // dynamic
+      id: json['id'] ?? json['Id'],
       type: type,
-      title: json['title'] as String? ?? '',
+      title: (json['title'] ?? json['Title']) as String? ?? '',
       parents:
-          (json['parents'] as List?)?.map((e) => e.toString()).toList() ?? [],
-      index: json['index'] as int? ?? 0,
+          ((json['parents'] ?? json['Parents']) as List?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          [],
+      index: (json['index'] ?? json['Index']) as int? ?? 0,
       updatedAt:
-          DateTime.tryParse(json['updateAt'] as String? ?? '') ??
+          DateTime.tryParse(
+            ((json['updateAt'] ?? json['UpdateAt']) as String?) ?? '',
+          ) ??
           DateTime.now(),
     );
   }

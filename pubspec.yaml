@@ -73,6 +73,7 @@ dependencies:
     path: packages/flutter_blurhash
   visibility_detector: ^0.4.0+2
   scrollable_positioned_list: ^0.3.8
+  flutter_reorderable_grid_view: ^5.5.3
 
 dev_dependencies:
   flutter_test:

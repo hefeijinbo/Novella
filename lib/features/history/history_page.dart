@@ -130,29 +130,72 @@ class HistoryPageState extends ConsumerState<HistoryPage>
   }
 
   Future<void> _clearHistory() async {
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showModalBottomSheet<bool>(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('清空历史记录'),
-            content: const Text('确定要清空所有阅读历史吗？此操作不可恢复。'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('取消'),
+      useSafeArea: true,
+      showDragHandle: true,
+      isDismissible: false,
+      builder: (sheetContext) {
+        final colorScheme = Theme.of(sheetContext).colorScheme;
+        final textTheme = Theme.of(sheetContext).textTheme;
+
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+                child: Text(
+                  '清空历史记录',
+                  style: textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
-              TextButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('清空'),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Text(
+                  '确定要清空所有阅读历史吗？此操作不可恢复。',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
               ),
+              ListTile(
+                leading: Icon(Icons.delete, color: colorScheme.error),
+                title: Text(
+                  '确认清空',
+                  style: TextStyle(
+                    color: colorScheme.error,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                onTap: () => Navigator.pop(sheetContext, true),
+              ),
+              ListTile(
+                leading: Icon(Icons.close, color: colorScheme.onSurfaceVariant),
+                title: const Text('取消'),
+                onTap: () => Navigator.pop(sheetContext, false),
+              ),
+              const SizedBox(height: 16),
             ],
           ),
+        );
+      },
     );
 
     if (confirmed == true) {
       final success = await _userService.clearReadHistory();
       if (success && mounted) {
-        setState(() => _books = []);
+        setState(() {
+          _books = [];
+          _displayedCount = 0;
+          _error = null;
+        });
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('已清空历史记录')));

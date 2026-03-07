@@ -1,16 +1,19 @@
-import 'package:novella/src/widgets/book_cover_image.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_reorderable_grid_view/widgets/widgets.dart';
 import 'package:logging/logging.dart';
+import 'package:novella/core/widgets/m3e_loading_indicator.dart';
 import 'package:novella/data/models/book.dart';
 import 'package:novella/data/services/book_mark_service.dart';
 import 'package:novella/data/services/book_service.dart';
 import 'package:novella/data/services/user_service.dart';
 import 'package:novella/features/book/book_detail_page.dart';
-import 'package:novella/features/settings/settings_page.dart';
-import 'package:novella/core/widgets/m3e_loading_indicator.dart';
-import 'package:novella/src/widgets/book_type_badge.dart';
-import 'package:novella/src/widgets/book_cover_previewer.dart';
+import 'package:novella/features/settings/settings_provider.dart';
+import 'package:novella/features/shelf/shelf_folder_page.dart';
+import 'package:novella/features/shelf/widgets/shelf_edit_sheets.dart';
+import 'package:novella/features/shelf/widgets/shelf_grid_item.dart';
 
 class ShelfPage extends ConsumerStatefulWidget {
   const ShelfPage({super.key});
@@ -20,63 +23,105 @@ class ShelfPage extends ConsumerStatefulWidget {
 }
 
 class ShelfPageState extends ConsumerState<ShelfPage> {
+  static const int _pageSize = 24;
+
   final _logger = Logger('ShelfPage');
   final _bookService = BookService();
   final _userService = UserService();
   final _bookMarkService = BookMarkService();
-  final _scrollController = ScrollController();
+  final _browseScrollController = ScrollController();
+  final _sortScrollController = ScrollController();
+  final _gridViewKey = GlobalKey();
 
-  // State
-  List<ShelfItem> _items = [];
   final Map<int, Book> _bookDetails = {};
+  final Set<int> _selectedBookIds = {};
+  final Set<String> _selectedFolderIds = {};
+  List<ShelfItem> _rootItems = [];
+  List<ShelfItem> _allShelfBookItems = [];
   bool _loading = true;
   bool _loadingMore = false;
+  bool _isSortDragging = false;
+  bool _isEditMode = false;
+  bool _isSortMode = false;
   DateTime? _lastRefreshTime;
   int _displayedCount = 0;
-  static const int _pageSize = 24;
-
-  // 筛选状态 - 0: 默认（全部）, 1: 待读, 2: 在读, 3: 已读
   int _selectedFilter = 0;
+  int? _dragStartIndex;
+  int? _dragTargetIndex;
   Set<int> _markedBookIds = {};
 
-  // 多选状态
-  bool _isMultiSelectMode = false;
-  final Set<int> _selectedBookIds = {};
+  bool get _hasSelection =>
+      _selectedBookIds.isNotEmpty || _selectedFolderIds.isNotEmpty;
+
+  bool get _canRenameSelectedFolder =>
+      _selectedBookIds.isEmpty && _selectedFolderIds.length == 1;
+
+  bool get _usesDefaultGrid => _selectedFilter == 0;
+
+  int get _selectedImpactBookCount => _userService.getSelectedBookImpactCount(
+    bookIds: _selectedBookIds,
+    folderIds: _selectedFolderIds,
+  );
+
+  int get _selectedFolderContainedBookCount =>
+      _userService.getSelectedBookImpactCount(folderIds: _selectedFolderIds);
 
   @override
   void initState() {
     super.initState();
     _userService.addListener(_onShelfChanged);
-    _scrollController.addListener(_onScroll);
+    _browseScrollController.addListener(_onScroll);
+    _sortScrollController.addListener(_onScroll);
     _fetchShelf();
   }
 
   @override
   void dispose() {
     _userService.removeListener(_onShelfChanged);
-    _scrollController.dispose();
+    _browseScrollController.dispose();
+    _sortScrollController.dispose();
     super.dispose();
   }
 
+  void refresh() {
+    _refreshGrid(force: true);
+  }
+
   void _onScroll() {
-    if (_scrollController.position.pixels >=
-        _scrollController.position.maxScrollExtent - 200) {
+    final controller =
+        _usesDefaultGrid ? _sortScrollController : _browseScrollController;
+
+    if (!controller.hasClients || _isSortDragging) {
+      return;
+    }
+
+    if (controller.position.pixels >=
+        controller.position.maxScrollExtent - 200) {
       _loadMoreItems();
     }
   }
 
   void _onShelfChanged() {
-    if (mounted) {
-      _logger.info('Shelf update received, refreshing grid...');
-      // Refresh local view from cache
-      _refreshGrid(force: false);
-    }
+    if (!mounted || _isSortDragging) return;
+    _logger.info('Shelf update received, refreshing root shelf...');
+    _refreshGrid();
   }
 
-  /// 外部刷新书架的方法（静默刷新，无加载指示器）
-  void refresh() {
-    // 使用静默刷新避免显示加载转圈
-    _refreshGrid(force: true);
+  List<ShelfItem> get _allFilteredItems {
+    if (_selectedFilter == 0) {
+      return _rootItems;
+    }
+
+    return _allShelfBookItems
+        .where((item) => _markedBookIds.contains(item.id as int))
+        .toList();
+  }
+
+  List<ShelfItem> get _displayItems {
+    final items = _allFilteredItems;
+    final count =
+        _displayedCount > items.length ? items.length : _displayedCount;
+    return items.take(count).toList();
   }
 
   Future<void> _fetchShelf({bool force = false}) async {
@@ -84,196 +129,719 @@ class ShelfPageState extends ConsumerState<ShelfPage> {
         _lastRefreshTime != null &&
         DateTime.now().difference(_lastRefreshTime!) <
             const Duration(seconds: 2)) {
-      // 简短防抖
       return;
     }
 
-    setState(() {
-      _loading = true;
-    });
+    if (mounted) {
+      setState(() => _loading = true);
+    }
 
     try {
-      // 1. 确保已初始化
       await _userService.ensureInitialized();
-
-      // 2. 获取项目并拉取书籍详情
       await _refreshGrid(force: force);
     } catch (e) {
       _logger.severe('Error fetching shelf: $e');
-      if (mounted) {
-        setState(() {
-          _loading = false;
-        });
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('加载失败')));
-      }
+      if (!mounted) return;
+
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('\u52a0\u8f7d\u4e66\u67b6\u5931\u8d25')),
+      );
     }
   }
 
   Future<void> _refreshGrid({bool force = false}) async {
-    // 如果强制刷新，先拉取完整书架以确保缓存是最新的
     if (force) {
       await _userService.getShelf(forceRefresh: true);
     }
 
-    // 读取缓存（或最近拉取的数据） - 仅获取书籍（不含文件夹）
-    final allItems = _userService.getShelfItems();
-    final bookItems =
-        allItems.where((e) => e.type == ShelfItemType.book).toList();
+    final hadDisplayedItems = _displayedCount > 0;
+    final previousFilteredLength = _allFilteredItems.length;
+    final wasShowingAll =
+        hadDisplayedItems && _displayedCount >= previousFilteredLength;
+    final rootItems = _userService.getShelfItemsByParents(const []);
+    final allShelfBookItems = _userService.getAllBookItemsInDisplayOrder();
+    final filteredItems =
+        _selectedFilter == 0
+            ? rootItems
+            : allShelfBookItems
+                .where((item) => _markedBookIds.contains(item.id as int))
+                .toList(growable: false);
+    final desiredCount =
+        !hadDisplayedItems
+            ? _pageSize
+            : wasShowingAll
+            ? filteredItems.length
+            : _displayedCount;
+    final nextDisplayedCount =
+        desiredCount > filteredItems.length
+            ? filteredItems.length
+            : desiredCount;
+    final visibleBookIds =
+        (_selectedFilter == 0 ? rootItems : filteredItems)
+            .where((item) => item.type == ShelfItemType.book)
+            .map((item) => item.id as int)
+            .toSet();
+    final visibleFolderIds =
+        _selectedFilter == 0
+            ? rootItems
+                .where((item) => item.type == ShelfItemType.folder)
+                .map((item) => item.id as String)
+                .toSet()
+            : <String>{};
 
-    // 提取书籍ID并拉取详情
-    final bookIds = bookItems.map((e) => e.id as int).toList();
+    if (!mounted) {
+      return;
+    }
 
-    if (bookIds.isNotEmpty) {
-      try {
-        final books = await _bookService.getBooksByIds(bookIds);
-        final bookMap = {for (var b in books) b.id: b};
-        if (mounted) {
-          setState(() {
-            _bookDetails.addAll(bookMap);
-          });
+    setState(() {
+      _rootItems = rootItems;
+      _allShelfBookItems = allShelfBookItems;
+      _displayedCount = nextDisplayedCount;
+      _selectedBookIds.removeWhere(
+        (bookId) => !visibleBookIds.contains(bookId),
+      );
+      _selectedFolderIds.removeWhere(
+        (folderId) => !visibleFolderIds.contains(folderId),
+      );
+      _loading = false;
+      _lastRefreshTime = DateTime.now();
+    });
+
+    await _ensureBookDetails(_displayItems);
+  }
+
+  Future<void> _ensureBookDetails(List<ShelfItem> items) async {
+    final missingIds = <int>{};
+
+    for (final item in items) {
+      if (item.type == ShelfItemType.book) {
+        final bookId = item.id as int;
+        if (!_bookDetails.containsKey(bookId)) {
+          missingIds.add(bookId);
         }
-      } catch (e) {
-        _logger.warning('Failed to fetch book details: $e');
+        continue;
+      }
+
+      for (final previewId in _userService.getDirectChildBookIds(
+        item.id as String,
+      )) {
+        if (!_bookDetails.containsKey(previewId)) {
+          missingIds.add(previewId);
+        }
       }
     }
 
-    if (mounted) {
+    if (missingIds.isEmpty) {
+      return;
+    }
+
+    try {
+      final books = await _bookService.getBooksByIds(missingIds.toList());
+      if (!mounted) return;
+
       setState(() {
-        _items = bookItems;
-        // 保持分页显示数量不倒退：
-        // 从详情页返回时会触发刷新，如果这里强制重置为第一页（_pageSize），
-        // 且用户当前滚动位置已加载超过一页，会出现“某本书突然消失、滚动后又出现”的错觉。
-        // 典型场景：书架总数=25、_pageSize=24，则第25本书会在刷新后消失。
-        final desiredCount = _displayedCount == 0 ? _pageSize : _displayedCount;
-        _displayedCount = desiredCount.clamp(0, bookItems.length);
-        _loading = false;
-        _lastRefreshTime = DateTime.now();
+        for (final book in books) {
+          _bookDetails[book.id] = book;
+        }
       });
+    } catch (e) {
+      _logger.warning('Failed to fetch shelf book details: $e');
     }
   }
 
-  void _loadMoreItems() {
-    // 计算过滤后的项目以获取正确数量
-    final filteredItems =
-        _selectedFilter == 0
-            ? _items
-            : _items.where((item) => _markedBookIds.contains(item.id)).toList();
+  List<int> _folderPreviewBookIds(String folderId) {
+    return _userService.getDirectChildBookIds(folderId);
+  }
 
-    if (_loadingMore || _displayedCount >= filteredItems.length) return;
+  Map<int, Book> _folderPreviewBookDetails(List<int> previewBookIds) {
+    final previewBookDetails = <int, Book>{};
+    for (final bookId in previewBookIds) {
+      final book = _bookDetails[bookId];
+      if (book != null) {
+        previewBookDetails[bookId] = book;
+      }
+    }
+    return previewBookDetails;
+  }
+
+  String _itemKey(ShelfItem item) {
+    return item.type == ShelfItemType.folder
+        ? 'folder_${item.id}'
+        : 'book_${item.id}';
+  }
+
+  List<ShelfItem> _reorderItems(
+    List<ShelfItem> items,
+    int fromIndex,
+    int toIndex,
+  ) {
+    if (fromIndex == toIndex ||
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= items.length ||
+        toIndex >= items.length) {
+      return List<ShelfItem>.from(items);
+    }
+
+    final reordered = List<ShelfItem>.from(items);
+    final item = reordered.removeAt(fromIndex);
+    reordered.insert(toIndex, item);
+    return reordered;
+  }
+
+  Widget _wrapGridItem({
+    required ShelfItem item,
+    required Widget child,
+    required bool showSortHandle,
+  }) {
+    return KeyedSubtree(key: ValueKey(_itemKey(item)), child: child);
+  }
+
+  Widget _buildGridItem(
+    BuildContext context,
+    ShelfItem item, {
+    required bool showSortHandle,
+  }) {
+    if (item.type == ShelfItemType.folder) {
+      final folderId = item.id as String;
+      final previewBookIds = _folderPreviewBookIds(folderId);
+      final child = ShelfFolderGridItem(
+        title: item.title,
+        itemCount: _userService.getDirectChildCount(folderId),
+        previewBookIds: previewBookIds,
+        previewBookDetails: _folderPreviewBookDetails(previewBookIds),
+        selected:
+            _isEditMode &&
+            !_isSortMode &&
+            _selectedFolderIds.contains(folderId),
+        sortMode: showSortHandle,
+        onTap: () => _openFolder(item),
+      );
+
+      return _wrapGridItem(
+        item: item,
+        child: child,
+        showSortHandle: showSortHandle,
+      );
+    }
+
+    final bookId = item.id as int;
+    final child = HeroMode(
+      enabled: !showSortHandle,
+      child: ShelfBookGridItem(
+        book: _bookDetails[bookId],
+        bookId: bookId,
+        heroTag: 'shelf_cover_$bookId',
+        selected:
+            _isEditMode && !_isSortMode && _selectedBookIds.contains(bookId),
+        sortMode: showSortHandle,
+        enableHero: !showSortHandle,
+        enablePreview: !_isEditMode,
+        onTap: () => _openBook(item),
+      ),
+    );
+
+    return _wrapGridItem(
+      item: item,
+      child: child,
+      showSortHandle: showSortHandle,
+    );
+  }
+
+  Future<void> _refreshMarkedBookIds() async {
+    if (_selectedFilter == 0) {
+      if (mounted && _markedBookIds.isNotEmpty) {
+        setState(() => _markedBookIds = {});
+      }
+      return;
+    }
+
+    final status = BookMarkStatus.values[_selectedFilter];
+    final markedIds = await _bookMarkService.getBooksWithStatus(status);
+    if (!mounted) return;
+
+    setState(() {
+      _markedBookIds = markedIds;
+    });
+  }
+
+  void _loadMoreItems() {
+    final filteredItems = _allFilteredItems;
+    if (_loadingMore || _displayedCount >= filteredItems.length) {
+      return;
+    }
 
     setState(() => _loadingMore = true);
 
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (mounted) {
-        setState(() {
-          _displayedCount = (_displayedCount + _pageSize).clamp(
-            0,
-            filteredItems.length,
-          );
-          _loadingMore = false;
-        });
+    Future.delayed(const Duration(milliseconds: 100), () async {
+      if (!mounted) return;
+
+      setState(() {
+        final nextCount = _displayedCount + _pageSize;
+        _displayedCount =
+            nextCount > filteredItems.length ? filteredItems.length : nextCount;
+        _loadingMore = false;
+      });
+
+      await _ensureBookDetails(_displayItems);
+    });
+  }
+
+  void _handleSortDragStarted(int index) {
+    setState(() {
+      _isSortDragging = true;
+      _dragStartIndex = index;
+      _dragTargetIndex = index;
+    });
+  }
+
+  void _handleSortDragEnd(int index) {
+    setState(() {
+      _isSortDragging = false;
+      _dragTargetIndex = index;
+      if (_dragStartIndex == index) {
+        _dragStartIndex = null;
+        _dragTargetIndex = null;
       }
     });
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-    final settings = ref.watch(settingsProvider);
+  Future<void> _handleRootItemsReordered() async {
+    final fromIndex = _dragStartIndex;
+    final toIndex = _dragTargetIndex;
 
-    return Scaffold(
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            // 自定义头部
-            _buildHeader(context, colorScheme, textTheme),
+    setState(() {
+      _dragStartIndex = null;
+      _dragTargetIndex = null;
+      if (fromIndex != null &&
+          toIndex != null &&
+          fromIndex != toIndex &&
+          _selectedFilter == 0) {
+        _rootItems = _reorderItems(_rootItems, fromIndex, toIndex);
+      }
+    });
 
-            // 筛选标签页
-            _buildFilterTabs(colorScheme),
+    if (fromIndex == null ||
+        toIndex == null ||
+        fromIndex == toIndex ||
+        _selectedFilter != 0) {
+      return;
+    }
 
-            // 内容
-            Expanded(
-              child: Builder(
-                builder: (context) {
-                  // 计算过滤后的项目
-                  final allFilteredItems =
-                      _selectedFilter == 0
-                          ? _items
-                          : _items
-                              .where((item) => _markedBookIds.contains(item.id))
-                              .toList();
-                  final displayItems =
-                      allFilteredItems.take(_displayedCount).toList();
-                  final hasMore = _displayedCount < allFilteredItems.length;
+    await _userService.reorderItemsInParents(
+      parents: const [],
+      fromIndex: fromIndex,
+      toIndex: toIndex,
+    );
+  }
 
-                  if (_loading) {
-                    return const Center(child: M3ELoadingIndicator());
-                  }
-                  if (allFilteredItems.isEmpty) {
-                    return Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _selectedFilter == 0
-                                ? Icons.bookmark_border
-                                : _getFilterIcon(_selectedFilter),
-                            size: 64,
-                            color: colorScheme.onSurfaceVariant,
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            _selectedFilter == 0
-                                ? '书架空空如也'
-                                : '没有标记为${_getFilterLabel(_selectedFilter)}的书籍',
-                            style: textTheme.bodyLarge?.copyWith(
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-                  return RefreshIndicator(
-                    onRefresh: () => _fetchShelf(force: true),
-                    child: GridView.builder(
-                      controller: _scrollController,
-                      padding: EdgeInsets.fromLTRB(
-                        12,
-                        12,
-                        12,
-                        settings.useIOS26Style ? 86 : 24,
-                      ),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
-                            childAspectRatio: 0.58,
-                            crossAxisSpacing: 10,
-                            mainAxisSpacing: 12,
-                          ),
-                      itemCount:
-                          displayItems.length +
-                          (hasMore && _loadingMore ? 3 : 0),
-                      itemBuilder: (context, index) {
-                        if (index >= displayItems.length) {
-                          return const Center(child: M3ELoadingIndicator());
-                        }
-                        final item = displayItems[index];
-                        return _buildBookItem(item);
-                      },
-                    ),
-                  );
-                },
-              ),
+  Future<void> _onFilterChanged(int filterIndex) async {
+    if (filterIndex == _selectedFilter) return;
+
+    setState(() {
+      _selectedFilter = filterIndex;
+      _displayedCount = _pageSize;
+      _selectedBookIds.clear();
+      _selectedFolderIds.clear();
+      _dragStartIndex = null;
+      _dragTargetIndex = null;
+      _isSortDragging = false;
+      _isSortMode = false;
+      _isEditMode = false;
+    });
+
+    await _refreshMarkedBookIds();
+
+    if (!mounted) return;
+
+    final filteredItems = _allFilteredItems;
+    setState(() {
+      _displayedCount =
+          _displayedCount > filteredItems.length
+              ? filteredItems.length
+              : _displayedCount;
+    });
+
+    await _ensureBookDetails(_displayItems);
+  }
+
+  Future<void> _openFolder(ShelfItem item) async {
+    if (_isSortMode) {
+      return;
+    }
+
+    if (_isEditMode) {
+      _toggleFolderSelection(item.id as String);
+      return;
+    }
+
+    final folderId = item.id as String;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder:
+            (_) => ShelfFolderPage(
+              folderId: folderId,
+              folderTitle: item.title,
+              folderPath: [...item.parents, folderId],
             ),
-          ],
-        ),
       ),
     );
+
+    if (_selectedFilter > 0) {
+      await _refreshMarkedBookIds();
+    }
+    await _refreshGrid();
+  }
+
+  Future<void> _openBook(ShelfItem item) async {
+    final bookId = item.id as int;
+    final book = _bookDetails[bookId];
+
+    if (_isSortMode) {
+      return;
+    }
+
+    if (_isEditMode) {
+      _toggleBookSelection(bookId);
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder:
+            (_) => BookDetailPage(
+              bookId: bookId,
+              initialCoverUrl: book?.cover,
+              initialTitle: book?.title,
+              heroTag: 'shelf_cover_$bookId',
+            ),
+      ),
+    );
+
+    await _refreshGrid();
+    if (_selectedFilter > 0) {
+      await _refreshMarkedBookIds();
+    }
+  }
+
+  void _enterEditMode() {
+    setState(() {
+      _isEditMode = true;
+      _isSortMode = false;
+    });
+  }
+
+  void _toggleSortMode() {
+    if (_hasSelection || _selectedFilter != 0) {
+      return;
+    }
+
+    setState(() {
+      _isSortMode = !_isSortMode;
+      _dragStartIndex = null;
+      _dragTargetIndex = null;
+      _isSortDragging = false;
+    });
+  }
+
+  void _exitEditMode() {
+    setState(() {
+      _selectedBookIds.clear();
+      _selectedFolderIds.clear();
+      _dragStartIndex = null;
+      _dragTargetIndex = null;
+      _isSortDragging = false;
+      _isSortMode = false;
+      _isEditMode = false;
+    });
+  }
+
+  void _toggleBookSelection(int bookId) {
+    setState(() {
+      if (_selectedBookIds.contains(bookId)) {
+        _selectedBookIds.remove(bookId);
+      } else {
+        _selectedBookIds.add(bookId);
+      }
+    });
+  }
+
+  void _toggleFolderSelection(String folderId) {
+    setState(() {
+      if (_selectedFolderIds.contains(folderId)) {
+        _selectedFolderIds.remove(folderId);
+      } else {
+        _selectedFolderIds.add(folderId);
+      }
+    });
+  }
+
+  List<ShelfMoveDestination> _moveDestinations() {
+    final folders = _userService.getFolders();
+
+    return folders
+        .map((folder) {
+          final folderId = folder.id as String;
+          final pathTitles = _userService.getFolderTitles(folder.parents);
+          return ShelfMoveDestination(
+            title:
+                folder.title.isEmpty
+                    ? '\u672a\u547d\u540d\u6587\u4ef6\u5939'
+                    : folder.title,
+            subtitle: pathTitles.isEmpty ? null : pathTitles.join(' / '),
+            parents: [...folder.parents, folderId],
+          );
+        })
+        .toList(growable: false);
+  }
+
+  Future<void> _handleEditConfirm() async {
+    if (!_hasSelection) {
+      return;
+    }
+
+    final destinations = _moveDestinations();
+    final hasSelectedFolders = _selectedFolderIds.isNotEmpty;
+    final action = await showShelfEditActionSheet(
+      context: context,
+      selectedBookCount: _selectedBookIds.length,
+      selectedFolderCount: _selectedFolderIds.length,
+      selectedFolderBookCount: _selectedFolderContainedBookCount,
+      canMove:
+          !hasSelectedFolders &&
+          _selectedBookIds.isNotEmpty &&
+          destinations.isNotEmpty,
+      showRenameOption: _selectedFilter == 0,
+      canRename: _canRenameSelectedFolder,
+      moveDisabledReason:
+          hasSelectedFolders
+              ? '\u9009\u4e2d\u6587\u4ef6\u5939\u65f6\u6682\u4e0d\u652f\u6301\u79fb\u52a8'
+              : destinations.isEmpty
+              ? '\u5f53\u524d\u6ca1\u6709\u53ef\u79fb\u52a8\u7684\u76ee\u6807'
+              : null,
+      renameDisabledReason:
+          '\u4ec5\u652f\u6301\u5355\u9009\u6587\u4ef6\u5939\u91cd\u547d\u540d',
+    );
+
+    if (!mounted || action == null) {
+      return;
+    }
+
+    switch (action) {
+      case ShelfEditAction.delete:
+        final confirmed = await showShelfDeleteConfirmSheet(
+          context: context,
+          selectedBookCount: _selectedBookIds.length,
+          selectedFolderCount: _selectedFolderIds.length,
+          selectedFolderBookCount: _selectedFolderContainedBookCount,
+        );
+        if (!mounted || !confirmed) {
+          return;
+        }
+        await _deleteSelectedItems();
+        break;
+      case ShelfEditAction.move:
+        final parents = await showShelfMoveDestinationSheet(
+          context: context,
+          selectedBookCount: _selectedBookIds.length,
+          destinations: destinations,
+        );
+        if (!mounted || parents == null) {
+          return;
+        }
+        await _moveSelectedBooks(parents);
+        break;
+      case ShelfEditAction.rename:
+        await _renameSelectedFolder();
+        break;
+    }
+  }
+
+  Future<void> _deleteSelectedItems() async {
+    final selectedBookIds = _selectedBookIds.toList(growable: false);
+    final selectedFolderIds = _selectedFolderIds.toList(growable: false);
+    final impactedBookCount = _selectedImpactBookCount;
+    final folderCount = selectedFolderIds.length;
+    final success = await _userService.removeSelectionFromShelf(
+      bookIds: selectedBookIds,
+      folderIds: selectedFolderIds,
+    );
+    if (!mounted || !success) {
+      return;
+    }
+
+    final snackBarText =
+        folderCount > 0
+            ? impactedBookCount > 0
+                ? '\u5df2\u5220\u9664 $impactedBookCount \u672c\u4e66\u548c $folderCount \u4e2a\u6587\u4ef6\u5939'
+                : '\u5df2\u5220\u9664 $folderCount \u4e2a\u6587\u4ef6\u5939'
+            : '\u5df2\u4ece\u4e66\u67b6\u79fb\u51fa ${selectedBookIds.length} \u672c\u4e66';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(snackBarText),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+
+    setState(() {
+      _selectedBookIds.clear();
+      _selectedFolderIds.clear();
+      _isSortMode = false;
+      _isEditMode = false;
+    });
+
+    await _refreshMarkedBookIds();
+    await _refreshGrid();
+  }
+
+  Future<void> _moveSelectedBooks(List<String> parents) async {
+    final selectedIds = _selectedBookIds.toList(growable: false);
+    final success = await _userService.moveBooksToParents(selectedIds, parents);
+    if (!mounted || !success) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('\u5df2\u79fb\u52a8 ${selectedIds.length} \u672c\u4e66'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+
+    setState(() {
+      _selectedBookIds.clear();
+      _selectedFolderIds.clear();
+      _isSortMode = false;
+      _isEditMode = false;
+    });
+
+    await _refreshMarkedBookIds();
+    await _refreshGrid();
+  }
+
+  Future<void> _renameSelectedFolder() async {
+    if (!_canRenameSelectedFolder) {
+      return;
+    }
+
+    final folderId = _selectedFolderIds.first;
+    final folder = _userService.getFolderById(folderId);
+    if (folder == null) {
+      return;
+    }
+
+    final currentTitle = folder.title.trim();
+    final nextName = await showShelfRenameFolderSheet(
+      context: context,
+      initialName: folder.title,
+    );
+    if (!mounted || nextName == null) {
+      return;
+    }
+
+    final trimmedName = nextName.trim();
+    if (trimmedName.isEmpty || trimmedName == currentTitle) {
+      return;
+    }
+
+    final success = await _userService.renameFolder(folderId, trimmedName);
+    if (!mounted) {
+      return;
+    }
+
+    if (!success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            '\u6587\u4ef6\u5939\u540d\u79f0\u65e0\u6548\u6216\u5df2\u5b58\u5728',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '\u5df2\u91cd\u547d\u540d\u6587\u4ef6\u5939\uff1a$trimmedName',
+        ),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+
+    setState(() {
+      _selectedBookIds.clear();
+      _selectedFolderIds.clear();
+      _isSortMode = false;
+      _isEditMode = false;
+    });
+
+    await _refreshGrid();
+  }
+
+  Future<void> _createFolder() async {
+    if (_hasSelection || _isSortMode) {
+      return;
+    }
+
+    final folderName = await showShelfCreateFolderSheet(context: context);
+    if (!mounted || folderName == null) {
+      return;
+    }
+
+    final folderId = await _userService.createFolder(folderName);
+    if (!mounted) {
+      return;
+    }
+
+    if (folderId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            '\u6587\u4ef6\u5939\u540d\u79f0\u65e0\u6548\u6216\u5df2\u5b58\u5728',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('\u5df2\u65b0\u5efa\u6587\u4ef6\u5939\uff1a$folderName'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+
+    await _refreshGrid();
+  }
+
+  IconData _getFilterIcon(int filterIndex) {
+    switch (filterIndex) {
+      case 1:
+        return Icons.schedule;
+      case 2:
+        return Icons.auto_stories;
+      case 3:
+        return Icons.check_circle_outline;
+      default:
+        return Icons.folder_open_outlined;
+    }
+  }
+
+  String _getFilterLabel(int filterIndex) {
+    switch (filterIndex) {
+      case 1:
+        return '\u5f85\u8bfb';
+      case 2:
+        return '\u5728\u8bfb';
+      case 3:
+        return '\u5df2\u8bfb';
+      default:
+        return '';
+    }
   }
 
   Widget _buildHeader(
@@ -281,65 +849,85 @@ class ShelfPageState extends ConsumerState<ShelfPage> {
     ColorScheme colorScheme,
     TextTheme textTheme,
   ) {
+    final selectedImpactCount = _selectedImpactBookCount;
+    final title =
+        _isEditMode
+            ? (_isSortMode
+                ? '\u62d6\u62fd\u6392\u5e8f'
+                : !_hasSelection
+                ? '\u7f16\u8f91\u4e66\u67b6'
+                : '\u5df2\u9009\u62e9 $selectedImpactCount \u672c')
+            : '\u4e66\u67b6';
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 24, 16, 8),
       child: Row(
         children: [
-          // 标题
           Expanded(
             child: Text(
-              '书架',
+              title,
               style: textTheme.headlineMedium?.copyWith(
                 fontWeight: FontWeight.bold,
                 color: colorScheme.onSurface,
               ),
             ),
           ),
-
-          // 删除按钮（仅在多选模式且有选中项时显示）
-          if (_isMultiSelectMode && _selectedBookIds.isNotEmpty)
-            IconButton(
-              icon: const Icon(Icons.delete),
-              color: Colors.red,
-              onPressed: _confirmBatchDelete,
-              tooltip: '删除所选 (${_selectedBookIds.length})',
-            ),
-
-          // 退出多选按钮（仅在多选模式显示）
-          if (_isMultiSelectMode)
+          if (_isEditMode) ...[
+            if (_selectedFilter == 0)
+              IconButton(
+                icon: const Icon(Icons.add),
+                onPressed:
+                    (_hasSelection || _isSortMode) ? null : _createFolder,
+                tooltip: '\u65b0\u5efa\u6587\u4ef6\u5939',
+              ),
+            if (_selectedFilter == 0)
+              IconButton(
+                icon: Icon(
+                  Icons.drag_indicator,
+                  color: _isSortMode ? colorScheme.primary : null,
+                ),
+                onPressed: _hasSelection ? null : _toggleSortMode,
+                tooltip:
+                    _isSortMode
+                        ? '\u9000\u51fa\u62d6\u62fd\u6392\u5e8f'
+                        : '\u62d6\u62fd\u6392\u5e8f',
+              ),
             IconButton(
               icon: const Icon(Icons.close),
-              onPressed: () {
-                setState(() {
-                  _selectedBookIds.clear();
-                  _isMultiSelectMode = false;
-                });
-              },
-              tooltip: '退出多选',
+              onPressed: _isSortMode ? null : _exitEditMode,
+              tooltip: '\u53d6\u6d88',
             ),
-
-          // 进入多选按钮（仅在非多选模式显示）
-          if (!_isMultiSelectMode)
             IconButton(
-              icon: const Icon(Icons.checklist),
-              onPressed: () => setState(() => _isMultiSelectMode = true),
-              tooltip: '多选',
+              icon: const Icon(Icons.check),
+              onPressed:
+                  _hasSelection && !_isSortMode ? _handleEditConfirm : null,
+              tooltip: '\u786e\u8ba4',
             ),
-
-          // 刷新按钮
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => _fetchShelf(force: true),
-            tooltip: '刷新',
-          ),
+          ] else ...[
+            IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: _enterEditMode,
+              tooltip: '\u7f16\u8f91',
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: () => _fetchShelf(force: true),
+              tooltip: '\u5237\u65b0',
+            ),
+          ],
         ],
       ),
     );
   }
 
-  /// 构建筛选标签行
   Widget _buildFilterTabs(ColorScheme colorScheme) {
-    final labels = ['默认', '待读', '在读', '已读'];
+    const labels = [
+      '\u9ed8\u8ba4',
+      '\u5f85\u8bfb',
+      '\u5728\u8bfb',
+      '\u5df2\u8bfb',
+    ];
+
     return SizedBox(
       height: 40,
       child: ListView.separated(
@@ -380,263 +968,189 @@ class ShelfPageState extends ConsumerState<ShelfPage> {
     );
   }
 
-  /// 处理筛选标签切换
-  Future<void> _onFilterChanged(int filterIndex) async {
-    if (filterIndex == _selectedFilter) return;
-
-    setState(() {
-      _selectedFilter = filterIndex;
-      _displayedCount = _pageSize; // 切换筛选时重置分页
-    });
-
-    // 非默认筛选时，从本地存储加载标记的书籍ID
-    if (filterIndex > 0) {
-      final status = BookMarkStatus.values[filterIndex];
-      final markedIds = await _bookMarkService.getBooksWithStatus(status);
-      if (mounted) {
-        setState(() {
-          _markedBookIds = markedIds;
-        });
-      }
-    } else {
-      // 重置为显示全部
-      if (mounted) {
-        setState(() {
-          _markedBookIds = {};
-        });
-      }
-    }
-  }
-
-  /// 获取筛选索引对应的图标
-  IconData _getFilterIcon(int filterIndex) {
-    switch (filterIndex) {
-      case 1:
-        return Icons.schedule;
-      case 2:
-        return Icons.auto_stories;
-      case 3:
-        return Icons.check_circle_outline;
-      default:
-        return Icons.bookmark_border;
-    }
-  }
-
-  /// 获取筛选索引对应的标签
-  String _getFilterLabel(int filterIndex) {
-    switch (filterIndex) {
-      case 1:
-        return '待读';
-      case 2:
-        return '在读';
-      case 3:
-        return '已读';
-      default:
-        return '';
-    }
-  }
-
-  Widget _buildBookItem(ShelfItem item) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
-    final book = _bookDetails[item.id];
-    final heroTag = 'shelf_cover_${item.id}';
-
-    return GestureDetector(
-      onTap: () async {
-        if (_isMultiSelectMode) {
-          // 在多选模式下切换选中状态
-          _toggleBookSelection(item.id as int);
-        } else {
-          // 正常跳转到详情页
-          await Navigator.of(context).push(
-            MaterialPageRoute(
-              builder:
-                  (_) => BookDetailPage(
-                    bookId: item.id as int,
-                    initialCoverUrl: book?.cover,
-                    initialTitle: book?.title,
-                    heroTag: heroTag,
-                  ),
-            ),
-          );
-          // 从详情页返回时刷新网格以反映更改
-          _refreshGrid();
-          // 如果筛选处于激活状态，也刷新标记的书籍ID
-          if (_selectedFilter > 0) {
-            final status = BookMarkStatus.values[_selectedFilter];
-            final markedIds = await _bookMarkService.getBooksWithStatus(status);
-            if (mounted) {
-              setState(() {
-                _markedBookIds = markedIds;
-              });
-            }
-          }
-        }
-      },
+  Widget _buildEmptyState(ColorScheme colorScheme, TextTheme textTheme) {
+    return Center(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Hero(
-              tag: heroTag,
-              child: Stack(
-                children: [
-                  Card(
-                    elevation: 2,
-                    shadowColor: colorScheme.shadow.withValues(alpha: 0.3),
-                    clipBehavior: Clip.antiAlias,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        // 书籍封面图片
-                        book == null
-                            ? Container(
-                              color: colorScheme.surfaceContainerHighest,
-                              child: const Center(child: M3ELoadingIndicator()),
-                            )
-                            : BookCoverPreviewer(
-                              coverUrl: book.cover,
-                              child: BookCoverImage(
-                                imageUrl: book.cover,
-                                width: double.infinity,
-                                height: double.infinity,
-                              ),
-                            ),
-                        // 多选模式下选中书籍的红色遮罩
-                        if (_isMultiSelectMode &&
-                            _selectedBookIds.contains(item.id))
-                          Container(
-                            color: Colors.red.withValues(alpha: 0.6),
-                            child: const Center(
-                              child: Icon(
-                                Icons.delete,
-                                color: Colors.white,
-                                size: 32,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  Consumer(
-                    builder: (context, ref, _) {
-                      if (ref
-                          .watch(settingsProvider)
-                          .isBookTypeBadgeEnabled('shelf')) {
-                        return BookTypeBadge(category: book?.category);
-                      }
-                      return const SizedBox.shrink();
-                    },
-                  ),
-                ],
+          Icon(
+            _selectedFilter == 0
+                ? Icons.folder_open_outlined
+                : _getFilterIcon(_selectedFilter),
+            size: 64,
+            color: colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(height: 16),
+          if (_selectedFilter == 0)
+            Text(
+              '\u4e66\u67b6\u7a7a\u7a7a\u5982\u4e5f',
+              textAlign: TextAlign.center,
+              style: textTheme.bodyLarge?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            )
+          else ...[
+            Text(
+              '\u6ca1\u6709\u6807\u8bb0\u4e3a${_getFilterLabel(_selectedFilter)}\u7684\u4e66\u7c4d',
+              textAlign: TextAlign.center,
+              style: textTheme.bodyLarge?.copyWith(
+                color: colorScheme.onSurfaceVariant,
               ),
             ),
-          ),
-          SizedBox(
-            height: 36, // 固定高度容纳两行文字
-            child: Padding(
-              padding: const EdgeInsets.only(top: 6, left: 2, right: 2),
-              child: Text(
-                book?.title ?? '',
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurface,
-                  height: 1.2,
-                ),
-                textAlign: TextAlign.center,
+            const SizedBox(height: 6),
+            Text(
+              '\u957f\u6309\u8be6\u60c5\u9875\u4e66\u7b7e\u6309\u94ae\u5373\u53ef\u6807\u8bb0',
+              textAlign: TextAlign.center,
+              style: textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
               ),
             ),
-          ),
+          ],
         ],
       ),
     );
   }
 
-  /// 在多选模式下切换书籍选中状态
-  void _toggleBookSelection(int bookId) {
-    setState(() {
-      if (_selectedBookIds.contains(bookId)) {
-        _selectedBookIds.remove(bookId);
-      } else {
-        _selectedBookIds.add(bookId);
-      }
-    });
+  Widget _buildStandardGrid({
+    required List<ShelfItem> displayItems,
+    required bool hasMore,
+    required AppSettings settings,
+  }) {
+    return RefreshIndicator(
+      onRefresh: () => _fetchShelf(force: true),
+      child: GridView.builder(
+        controller: _browseScrollController,
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.fromLTRB(
+          12,
+          12,
+          12,
+          settings.useIOS26Style ? 86 : 24,
+        ),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 3,
+          childAspectRatio: 0.58,
+          crossAxisSpacing: 10,
+          mainAxisSpacing: 12,
+        ),
+        itemCount: displayItems.length + (hasMore && _loadingMore ? 3 : 0),
+        itemBuilder: (context, index) {
+          if (index >= displayItems.length) {
+            return const Center(child: M3ELoadingIndicator());
+          }
+
+          return _buildGridItem(
+            context,
+            displayItems[index],
+            showSortHandle: false,
+          );
+        },
+      ),
+    );
   }
 
-  /// 确认并执行批量删除
-  Future<void> _confirmBatchDelete() async {
-    final count = _selectedBookIds.length;
-    final confirmed = await showModalBottomSheet<bool>(
-      context: context,
-      useSafeArea: true,
-      showDragHandle: true,
-      isDismissible: false,
-      builder: (context) {
-        final colorScheme = Theme.of(context).colorScheme;
-        final textTheme = Theme.of(context).textTheme;
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                child: Text(
-                  '移出书架',
-                  style: textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: Text(
-                  '确定要将选中的 $count 本书移出书架吗？',
-                  style: textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-              ListTile(
-                leading: Icon(Icons.delete, color: colorScheme.error),
-                title: Text(
-                  '确认移出',
-                  style: TextStyle(
-                    color: colorScheme.error,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                onTap: () => Navigator.pop(context, true),
-              ),
-              ListTile(
-                leading: Icon(Icons.close, color: colorScheme.onSurfaceVariant),
-                title: const Text('取消'),
-                onTap: () => Navigator.pop(context, false),
-              ),
-              const SizedBox(height: 16),
-            ],
-          ),
-        );
-      },
-    );
+  Widget _buildEditableGrid({
+    required List<ShelfItem> displayItems,
+    required bool hasMore,
+    required AppSettings settings,
+  }) {
+    return RefreshIndicator(
+      onRefresh: () => _fetchShelf(force: true),
+      child: ReorderableBuilder<ShelfItem>.builder(
+        itemCount: displayItems.length,
+        scrollController: _sortScrollController,
+        longPressDelay: const Duration(milliseconds: 180),
+        enableDraggable: _isSortMode,
+        feedbackScaleFactor: 1,
+        dragChildBoxDecoration: const BoxDecoration(),
+        onDragStarted: _handleSortDragStarted,
+        onDragEnd: _handleSortDragEnd,
+        onReorder: (_) {
+          unawaited(_handleRootItemsReordered());
+        },
+        childBuilder: (itemBuilder) {
+          return GridView.builder(
+            key: _gridViewKey,
+            controller: _sortScrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: EdgeInsets.fromLTRB(
+              12,
+              12,
+              12,
+              settings.useIOS26Style ? 86 : 24,
+            ),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              childAspectRatio: 0.58,
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 12,
+            ),
+            itemCount: displayItems.length + (hasMore && _loadingMore ? 3 : 0),
+            itemBuilder: (context, index) {
+              if (index >= displayItems.length) {
+                return const Center(child: M3ELoadingIndicator());
+              }
 
-    if (confirmed == true) {
-      for (final id in _selectedBookIds) {
-        await _userService.removeFromShelf(id);
-      }
-      setState(() {
-        _selectedBookIds.clear();
-        _isMultiSelectMode = false;
-      });
-      _refreshGrid(force: false);
-    }
+              return itemBuilder(
+                _buildGridItem(
+                  context,
+                  displayItems[index],
+                  showSortHandle: _isSortMode,
+                ),
+                index,
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final settings = ref.watch(settingsProvider);
+
+    return Scaffold(
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            _buildHeader(context, colorScheme, textTheme),
+            _buildFilterTabs(colorScheme),
+            Expanded(
+              child: Builder(
+                builder: (context) {
+                  final allFilteredItems = _allFilteredItems;
+                  final displayItems = _displayItems;
+                  final hasMore = _displayedCount < allFilteredItems.length;
+
+                  if (_loading) {
+                    return const Center(child: M3ELoadingIndicator());
+                  }
+
+                  if (allFilteredItems.isEmpty) {
+                    return _buildEmptyState(colorScheme, textTheme);
+                  }
+
+                  return _usesDefaultGrid
+                      ? _buildEditableGrid(
+                        displayItems: displayItems,
+                        hasMore: hasMore,
+                        settings: settings,
+                      )
+                      : _buildStandardGrid(
+                        displayItems: displayItems,
+                        hasMore: hasMore,
+                        settings: settings,
+                      );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

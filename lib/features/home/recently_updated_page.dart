@@ -111,6 +111,10 @@ class _RecentlyUpdatedPageState extends ConsumerState<RecentlyUpdatedPage> {
     return _currentFrontendPage < maxPages;
   }
 
+  bool get _shouldShowPagination {
+    return _allValidBooks.length > _pageSize || !_hasReachedEnd;
+  }
+
   Widget _buildPagination() {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
@@ -207,7 +211,7 @@ class _RecentlyUpdatedPageState extends ConsumerState<RecentlyUpdatedPage> {
                         }, childCount: displayBooks.length),
                       ),
                     ),
-                    if (_allValidBooks.isNotEmpty)
+                    if (_shouldShowPagination)
                       SliverToBoxAdapter(child: _buildPagination()),
                     // 给底部留点安全边距
                     SliverToBoxAdapter(
