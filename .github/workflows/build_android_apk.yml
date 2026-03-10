@@ -22,6 +22,9 @@ jobs:
         with:
           lfs: true
 
+      - name: Set Commit SHA
+        run: echo "COMMIT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
       # 配置 Java 环境
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -55,7 +58,7 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: flutter build apk --release --verbose
+        run: flutter build apk --release --verbose --dart-define=COMMIT_ID=$COMMIT_SHA
 
       # 重命名 APK
       - name: Rename APK

@@ -1,7 +1,9 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:novella/core/config/app_build_info.dart';
 import 'package:novella/main.dart' show rustLibInitialized, rustLibInitError;
 import 'package:novella/features/settings/settings_provider.dart';
 import 'package:novella/features/settings/source_code_page.dart';
@@ -19,6 +21,7 @@ class AboutSettingsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(settingsProvider);
     final colorScheme = Theme.of(context).colorScheme;
+    final displayVersion = AppBuildInfo.getDisplayVersion(settings.version);
 
     return Scaffold(
       body: CustomScrollView(
@@ -36,9 +39,25 @@ class AboutSettingsPage extends ConsumerWidget {
               ListTile(
                 leading: const Icon(Icons.info_outline),
                 title: const Text('版本'),
-                subtitle: Text(settings.version),
+                subtitle: Text(displayVersion),
                 onTap:
                     () => UpdateService.checkUpdate(context, ref, manual: true),
+                onLongPress:
+                    displayVersion.isEmpty
+                        ? null
+                        : () async {
+                          await Clipboard.setData(
+                            ClipboardData(text: displayVersion),
+                          );
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('已复制版本号'),
+                                duration: Duration(seconds: 1),
+                              ),
+                            );
+                          }
+                        },
               ),
 
               SwitchListTile(
