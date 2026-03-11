@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:novella/src/widgets/book_cover_image.dart';
 import 'package:novella/core/utils/cover_url_utils.dart';
 import 'package:flutter/material.dart';
@@ -16,6 +17,9 @@ import 'package:novella/data/models/comment.dart';
 import 'package:novella/features/comment/comment_page.dart';
 import 'package:novella/core/widgets/m3e_loading_indicator.dart';
 import 'package:novella/src/widgets/book_cover_previewer.dart';
+import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
+import 'package:html/dom.dart' as dom;
+import 'package:html/parser.dart' as html_parser;
 
 /// 骨架屏加载效果组件
 class ShimmerBox extends StatefulWidget {
@@ -1814,15 +1818,9 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
                     borderRadius: BorderRadius.circular(8),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Text(
-                        _stripHtml(book.introduction),
-                        style: TextStyle(
-                          color: colorScheme.onSurfaceVariant,
-                          height: 1.6,
-                          fontSize: 14,
-                        ),
-                        maxLines: 4,
-                        overflow: TextOverflow.ellipsis,
+                      child: _buildIntroPreview(
+                        book.introduction,
+                        colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ),
@@ -2042,9 +2040,9 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
                         controller: scrollController,
                         padding: const EdgeInsets.symmetric(horizontal: 24),
                         children: [
-                          Text(
-                            _stripHtml(intro),
-                            style: TextStyle(
+                          _buildIntroHtml(
+                            intro,
+                            baseStyle: TextStyle(
                               fontSize: 16,
                               height: 1.8,
                               color: Theme.of(context).colorScheme.onSurface,
@@ -2060,14 +2058,228 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
     );
   }
 
-  /// Simple HTML tag stripper
-  String _stripHtml(String html) {
-    return html
-        .replaceAll(RegExp(r'<[^>]*>'), '')
-        .replaceAll('&nbsp;', ' ')
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&amp;', '&')
-        .trim();
+  Widget _buildIntroPreview(String intro, Color textColor) {
+    return IgnorePointer(
+      child: _buildIntroHtml(
+        _buildIntroPreviewHtml(intro),
+        baseStyle: TextStyle(color: textColor, height: 1.6, fontSize: 14),
+        maxLines: 4,
+      ),
+    );
+  }
+
+  Widget _buildIntroHtml(
+    String html, {
+    required TextStyle baseStyle,
+    int? maxLines,
+  }) {
+    final lineHeight = baseStyle.height ?? 1.6;
+
+    return HtmlWidget(
+      html,
+      textStyle: baseStyle,
+      customWidgetBuilder:
+          (element) => _buildIntroRubyWidget(element, baseStyle),
+      customStylesBuilder: (element) {
+        switch (element.localName) {
+          case 'body':
+            return {
+              'margin': '0',
+              'padding': '0',
+              'line-height': lineHeight.toStringAsFixed(2),
+            };
+          case 'div':
+            if (element.attributes['data-intro-preview-root'] == '1') {
+              return {
+                'margin': '0',
+                'padding': '0',
+                'line-height': lineHeight.toStringAsFixed(2),
+                if (maxLines != null) 'max-lines': '$maxLines',
+                if (maxLines != null) 'text-overflow': 'ellipsis',
+              };
+            }
+            return {
+              'margin': '0 0 0.4em 0',
+              'line-height': lineHeight.toStringAsFixed(2),
+            };
+          case 'p':
+            return {
+              'margin': '0 0 0.6em 0',
+              'line-height': lineHeight.toStringAsFixed(2),
+            };
+          case 'rt':
+            return {'font-size': '0.55em', 'line-height': '1.0'};
+          case 'img':
+            return {'max-width': '100%', 'height': 'auto'};
+          default:
+            return null;
+        }
+      },
+    );
+  }
+
+  String _buildIntroPreviewHtml(String html) {
+    if (html.trim().isEmpty) {
+      return '<div data-intro-preview-root="1"></div>';
+    }
+
+    final fragment = html_parser.parseFragment(html);
+    final buffer = StringBuffer();
+    var justWroteBreak = false;
+
+    void writeBreak() {
+      if (buffer.isEmpty || justWroteBreak) {
+        return;
+      }
+      buffer.write('<br />');
+      justWroteBreak = true;
+    }
+
+    void appendNodes(List<dom.Node> nodes) {
+      for (final node in nodes) {
+        if (node is dom.Text) {
+          if (node.text.isEmpty) {
+            continue;
+          }
+          buffer.write(
+            const HtmlEscape(HtmlEscapeMode.element).convert(node.text),
+          );
+          justWroteBreak = false;
+          continue;
+        }
+
+        if (node is! dom.Element) {
+          continue;
+        }
+
+        final tag = (node.localName ?? '').toLowerCase();
+        if (tag.isEmpty) {
+          continue;
+        }
+
+        if (tag == 'script' || tag == 'style' || tag == 'img') {
+          continue;
+        }
+
+        if (tag == 'br') {
+          writeBreak();
+          continue;
+        }
+
+        if (_previewBlockTags.contains(tag)) {
+          final beforeLength = buffer.length;
+          appendNodes(node.nodes);
+          if (buffer.length > beforeLength) {
+            writeBreak();
+          }
+          continue;
+        }
+
+        buffer.write(node.outerHtml);
+        justWroteBreak = false;
+      }
+    }
+
+    appendNodes(fragment.nodes);
+    final flattened = buffer.toString().replaceAll(
+      RegExp(r'(?:<br\s*/?>\s*)+$', caseSensitive: false),
+      '',
+    );
+
+    return '<div data-intro-preview-root="1">$flattened</div>';
+  }
+
+  Widget? _buildIntroRubyWidget(dom.Element element, TextStyle baseStyle) {
+    if (element.localName != 'ruby') {
+      return null;
+    }
+
+    final segments = <({String ruby, String rt})>[];
+    final pendingNodes = <dom.Node>[];
+
+    void flushSegment([String rtText = '']) {
+      final rubyText =
+          pendingNodes
+              .map((node) => node.text)
+              .join()
+              .replaceAll('\n', '')
+              .trim();
+      pendingNodes.clear();
+
+      if (rubyText.isEmpty) {
+        return;
+      }
+
+      segments.add((ruby: rubyText, rt: rtText.trim()));
+    }
+
+    for (final node in element.nodes) {
+      if (node is dom.Element) {
+        if (node.localName == 'rp') {
+          continue;
+        }
+        if (node.localName == 'rt') {
+          flushSegment(node.text);
+          continue;
+        }
+      }
+
+      pendingNodes.add(node);
+    }
+
+    flushSegment();
+
+    if (segments.isEmpty) {
+      return null;
+    }
+
+    final baseFontSize = baseStyle.fontSize ?? 14;
+    final rtStyle = baseStyle.copyWith(
+      fontSize: baseFontSize * 0.55,
+      height: 1.0,
+    );
+    final rubyStyle = baseStyle.copyWith(height: 1.0);
+
+    return InlineCustomWidget(
+      alignment: PlaceholderAlignment.baseline,
+      baseline: TextBaseline.alphabetic,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children:
+            segments
+                .map(
+                  (segment) => Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 0.5),
+                    child:
+                        segment.rt.isEmpty
+                            ? Text(segment.ruby, style: rubyStyle)
+                            : HtmlRuby(
+                              rt: Text(segment.rt, style: rtStyle),
+                              ruby: Text(segment.ruby, style: rubyStyle),
+                            ),
+                  ),
+                )
+                .toList(),
+      ),
+    );
   }
 }
+
+const Set<String> _previewBlockTags = {
+  'p',
+  'div',
+  'section',
+  'article',
+  'blockquote',
+  'li',
+  'ul',
+  'ol',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+};
