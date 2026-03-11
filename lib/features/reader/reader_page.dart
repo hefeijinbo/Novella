@@ -425,6 +425,39 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     return changed ? buffer.toString() : text;
   }
 
+  String _normalizeReaderText(String text) {
+    return text
+        .replaceAll('\u200B', '')
+        .replaceAll('\u00A0', ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  bool _shouldPreserveExplicitBlankLine(dom.Element element) {
+    final hasText = _normalizeReaderText(element.text).isNotEmpty;
+    if (hasText) {
+      return false;
+    }
+
+    final hasImage = element.getElementsByTagName('img').isNotEmpty;
+    if (hasImage) {
+      return false;
+    }
+
+    return element.getElementsByTagName('br').isNotEmpty;
+  }
+
+  static const Set<String> _kNoFirstLineIndentClasses = {
+    'author',
+    'center',
+    'cut-line',
+    'left',
+    'meg',
+    'message',
+    'right',
+    'zin',
+  };
+
   bool _canApplyFirstLineIndent(dom.Element element) {
     const indentableTags = {'p', 'div', 'blockquote'};
     if (!indentableTags.contains(element.localName)) {
@@ -434,13 +467,16 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       return false;
     }
 
-    final rawText = element.text.replaceAll('\u200B', '').trim();
+    final rawText = _normalizeReaderText(element.text);
     if (rawText.isEmpty) {
       return false;
     }
 
     final align = (element.attributes['align'] ?? '').toLowerCase();
     final style = (element.attributes['style'] ?? '').toLowerCase();
+    if (element.classes.any(_kNoFirstLineIndentClasses.contains)) {
+      return false;
+    }
     if (align == 'center' || align == 'right') {
       return false;
     }
@@ -448,7 +484,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
         style.contains('text-align: center') ||
         style.contains('text-align:right') ||
         style.contains('text-align: right') ||
-        element.classes.contains('center')) {
+        style.contains('text-indent:0') ||
+        style.contains('text-indent: 0')) {
       return false;
     }
 
@@ -525,13 +562,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     );
     if (hasDirectStructuralChild) return false;
 
-    final text =
-        (el.text)
-            .replaceAll('\u200B', '')
-            .replaceAll(RegExp(r'\s+'), ' ')
-            .trim();
+    final text = _normalizeReaderText(el.text);
     final hasImg = el.getElementsByTagName('img').isNotEmpty;
-    return text.isNotEmpty || hasImg;
+    return text.isNotEmpty || hasImg || _shouldPreserveExplicitBlankLine(el);
   }
 
   bool _shouldTreatElementAsBlock(dom.Element el) {
@@ -546,13 +579,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     if (tag == 'hr') return true;
     if (tag == 'img') return true;
 
-    final text =
-        (el.text)
-            .replaceAll('\u200B', '')
-            .replaceAll(RegExp(r'\s+'), ' ')
-            .trim();
+    final text = _normalizeReaderText(el.text);
     final hasImg = el.getElementsByTagName('img').isNotEmpty;
-    return text.isNotEmpty || hasImg;
+    return text.isNotEmpty || hasImg || _shouldPreserveExplicitBlankLine(el);
   }
 
   double _computeBlockWeight({
@@ -574,11 +603,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     void addBlock(dom.Element el, String rawXPath) {
       final tag = el.localName ?? '';
 
-      final normalizedText =
-          (el.text)
-              .replaceAll('\u200B', '')
-              .replaceAll(RegExp(r'\s+'), ' ')
-              .trim();
+      final normalizedText = _normalizeReaderText(el.text);
       final textLength = normalizedText.length;
 
       final imageCount =
@@ -705,6 +730,399 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     );
   }
 
+  String _formatEmValue(double value) {
+    final rounded = value.toStringAsFixed(1);
+    return rounded.endsWith('.0')
+        ? '${value.toInt()}em'
+        : '${rounded}em';
+  }
+
+  String? _fontSizeFromPresetClass(Iterable<String> classes) {
+    final emClassPattern = RegExp(r'^em(\d{2})$');
+    for (final className in classes) {
+      final match = emClassPattern.firstMatch(className);
+      if (match == null) {
+        continue;
+      }
+
+      final rawValue = int.tryParse(match.group(1)!);
+      if (rawValue == null || rawValue < 5 || rawValue > 30) {
+        continue;
+      }
+
+      return _formatEmValue(rawValue / 10);
+    }
+
+    return null;
+  }
+
+  bool _isFootnoteMarkerImage(dom.Element img) {
+    if (img.classes.contains('footnote')) {
+      return true;
+    }
+
+    dom.Element? current = img.parent;
+    while (current != null) {
+      if (current.localName == 'a' && current.classes.contains('duokan-footnote')) {
+        return true;
+      }
+      current = current.parent;
+    }
+
+    return false;
+  }
+
+  bool _isIllustrationContainer(dom.Element element) {
+    return element.classes.contains('illus') ||
+        element.classes.contains('illu') ||
+        element.classes.contains('duokan-image-single');
+  }
+
+  static const Set<String> _kPreviewImageContainerClasses = {
+    'duokan-image-single',
+    'image-preview',
+    'illus',
+  };
+
+  bool _isPreviewImageContainer(dom.Element? element) {
+    if (element == null) {
+      return false;
+    }
+    return element.classes.any(_kPreviewImageContainerClasses.contains);
+  }
+
+  bool _hasNonFootnoteImage(dom.Element element) {
+    return element
+        .getElementsByTagName('img')
+        .any((img) => !_isFootnoteMarkerImage(img));
+  }
+
+  bool _isImageOnlyBlockContainer(dom.Element element) {
+    return _hasNonFootnoteImage(element) &&
+        _normalizeReaderText(element.text).isEmpty;
+  }
+
+  bool _shouldRenderAsIllustrationBlock(dom.Element element) {
+    return _isIllustrationContainer(element) ||
+        _isPreviewImageContainer(element) ||
+        _isImageOnlyBlockContainer(element);
+  }
+
+  bool _isPreviewableReaderImage(dom.Element element) {
+    if (element.localName != 'img' || element.classes.contains('no-preview')) {
+      return false;
+    }
+    return _isPreviewImageContainer(element.parent);
+  }
+
+  static const Set<String> _kTableRelatedTags = {
+    'table',
+    'thead',
+    'tbody',
+    'tfoot',
+    'tr',
+    'td',
+    'th',
+    'caption',
+  };
+
+  bool _hasAncestorTag(
+    dom.Element element,
+    Set<String> tags, {
+    int maxDepth = 8,
+  }) {
+    dom.Element? current = element.parent;
+    int depth = 0;
+    while (current != null && depth < maxDepth) {
+      if (tags.contains(current.localName)) {
+        return true;
+      }
+      current = current.parent;
+      depth++;
+    }
+    return false;
+  }
+
+  bool _isInsideTableStructure(dom.Element element) {
+    return _hasAncestorTag(element, _kTableRelatedTags);
+  }
+
+  bool _isInsideIllustrationContainer(dom.Element element) {
+    dom.Element? current = element.parent;
+    int depth = 0;
+    while (current != null && depth < 3) {
+      if (_isIllustrationContainer(current) ||
+          _isPreviewImageContainer(current)) {
+        return true;
+      }
+      current = current.parent;
+      depth++;
+    }
+    return false;
+  }
+
+  Map<String, String>? _buildReaderBlockTagStyles(
+    dom.Element element,
+    double readerLineHeight,
+  ) {
+    final tag = element.localName;
+    if (tag == null) {
+      return null;
+    }
+
+    if (tag == 'body') {
+      return {
+        'margin': '0',
+        'padding': '0',
+        'line-height': readerLineHeight.toStringAsFixed(1),
+      };
+    }
+
+    final textTags = {
+      'p',
+      'div',
+      'blockquote',
+      'h1',
+      'h2',
+      'h3',
+      'h4',
+      'h5',
+      'h6',
+      'center',
+    };
+    if (!textTags.contains(tag)) {
+      return null;
+    }
+
+    if (_shouldRenderAsIllustrationBlock(element)) {
+      return {
+        'margin': '0',
+        'padding': '0',
+        'line-height': '0',
+        'text-align': 'center',
+      };
+    }
+
+    switch (tag) {
+      case 'h1':
+        return {
+          'padding-left': '16px',
+          'padding-right': '16px',
+          'font-size': '1.65em',
+          'line-height': '120%',
+          'text-align': 'center',
+          'font-weight': 'bold',
+          'margin-top': '0.1em',
+          'margin-bottom': '0.4em',
+        };
+      case 'h2':
+        return {
+          'padding-left': '16px',
+          'padding-right': '16px',
+          'font-size': '1.25em',
+          'line-height': '120%',
+          'text-align': 'center',
+          'font-weight': 'bold',
+          'margin-top': '0.3em',
+          'margin-bottom': '0.5em',
+        };
+      case 'h3':
+        return {
+          'padding-left': '16px',
+          'padding-right': '16px',
+          'font-size': '0.95em',
+          'line-height': '120%',
+          'text-align': 'center',
+          'font-weight': 'bold',
+          'text-indent': '0',
+          'margin-top': '0.2em',
+          'margin-bottom': '0.2em',
+        };
+      case 'h4':
+        return {
+          'padding-left': '16px',
+          'padding-right': '16px',
+          'font-size': '1.5em',
+          'font-weight': 'bold',
+          'text-indent': '1.333em',
+          'margin-top': '0.5em',
+          'margin-bottom': '1em',
+        };
+      case 'center':
+        return {
+          'padding-left': '16px',
+          'padding-right': '16px',
+          'margin': '0',
+          'line-height': readerLineHeight.toStringAsFixed(1),
+          'text-align': 'center',
+          'text-indent': '0',
+        };
+      default:
+        return {
+          'padding-left': '16px',
+          'padding-right': '16px',
+          'margin': '0',
+          'line-height': readerLineHeight.toStringAsFixed(1),
+        };
+    }
+  }
+
+  Map<String, String>? _buildReaderPresetClassStyles(dom.Element element) {
+    final classes = element.classes;
+    if (classes.isEmpty) {
+      return null;
+    }
+
+    final style = <String, String>{};
+    final presetFontSize = _fontSizeFromPresetClass(classes);
+    if (presetFontSize != null) {
+      style['font-size'] = presetFontSize;
+    }
+
+    if (classes.contains('pius1') ||
+        classes.contains('pius2') ||
+        classes.contains('ph4')) {
+      style.addAll({
+        'font-size': '1.5em',
+        'font-weight': 'bold',
+        'text-indent': '1.333em',
+        'margin-top': '0.5em',
+        'margin-bottom': '1em',
+      });
+    }
+
+    if (classes.contains('right')) {
+      style.addAll({'text-indent': '0', 'text-align': 'right'});
+    }
+    if (classes.contains('left')) {
+      style.addAll({'text-indent': '0', 'text-align': 'left'});
+    }
+    if (classes.contains('center')) {
+      style.addAll({'text-indent': '0', 'text-align': 'center'});
+    }
+    if (classes.contains('zin')) {
+      style['text-indent'] = '0';
+    }
+
+    if (classes.contains('bold')) {
+      style['font-weight'] = 'bold';
+    }
+    if (classes.contains('ita')) {
+      style['font-style'] = 'italic';
+    }
+    if (classes.contains('stress')) {
+      style.addAll({
+        'font-weight': 'bold',
+        'font-size': '1.1em',
+        'margin-top': '0.3em',
+        'margin-bottom': '0.3em',
+      });
+    }
+    if (classes.contains('author')) {
+      style.addAll({
+        'font-size': '1.2em',
+        'text-align': 'right',
+        'font-weight': 'bold',
+        'font-style': 'italic',
+        'margin-right': '1em',
+        'text-indent': '0',
+      });
+    }
+    if (classes.contains('message') || classes.contains('cut-line')) {
+      style.addAll({
+        'text-indent': '0',
+        'line-height': '1.2em',
+        'margin-top': '0.2em',
+        'margin-bottom': '0.2em',
+      });
+    }
+    if (classes.contains('meg')) {
+      style.addAll({
+        'font-size': '1.3em',
+        'line-height': '1.3em',
+        'margin-top': '0.5em',
+        'margin-bottom': '0',
+        'text-indent': '0',
+      });
+    }
+    if (classes.contains('lh')) {
+      style['line-height'] = '1em';
+    }
+    if (classes.contains('m0')) {
+      style['margin'] = '0';
+    }
+    if (classes.contains('p0')) {
+      style['padding'] = '0';
+    }
+
+    if (classes.contains('red')) {
+      style['color'] = '#ff0000';
+    }
+    if (classes.contains('green')) {
+      style['color'] = '#00ff00';
+    }
+    if (classes.contains('blue')) {
+      style['color'] = '#0000ff';
+    }
+    if (classes.contains('black')) {
+      style['color'] = '#000000';
+    }
+    if (classes.contains('white')) {
+      style['color'] = '#ffffff';
+    }
+
+    if (classes.contains('fl')) {
+      style.addAll({'float': 'left', 'margin-right': '0.5em', 'padding': '0'});
+    }
+    if (classes.contains('fr')) {
+      style.addAll({'float': 'right', 'margin-left': '0.5em', 'padding': '0'});
+    }
+    if (classes.contains('cl')) {
+      style['clear'] = 'left';
+    }
+    if (classes.contains('cr')) {
+      style['clear'] = 'right';
+    }
+    if (classes.contains('cb')) {
+      style['clear'] = 'both';
+    }
+
+    if (classes.contains('vt')) {
+      style['vertical-align'] = 'top';
+    }
+    if (classes.contains('vb')) {
+      style['vertical-align'] = 'bottom';
+    }
+    if (classes.contains('vm')) {
+      style['vertical-align'] = 'middle';
+    }
+
+    if (classes.contains('no-d')) {
+      style['text-decoration'] = 'none';
+    }
+    if (classes.contains('bc')) {
+      style['border-collapse'] = 'collapse';
+    }
+    if (classes.contains('dash-break')) {
+      style['word-break'] = 'break-all';
+      style['word-wrap'] = 'break-word';
+    }
+    if (classes.contains('dot') || classes.contains('em-dot')) {
+      style['text-decoration-line'] = 'underline';
+      style['text-decoration-style'] = 'dotted';
+    }
+
+    if (_isIllustrationContainer(element) || _isPreviewImageContainer(element)) {
+      style.addAll({
+        'text-align': 'center',
+        'padding-top': '2px',
+        'padding-bottom': '2px',
+      });
+    }
+
+    return style.isEmpty ? null : style;
+  }
+
   int _lowerBoundPrefixWeight(List<double> prefixWeights, double target) {
     if (prefixWeights.isEmpty) return 0;
     int lo = 0;
@@ -758,6 +1176,119 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
       await completer.future;
       frames++;
     }
+  }
+
+  Future<void> _showReaderImagePreview(
+    BuildContext context, {
+    required String imageUrl,
+    String? alt,
+  }) async {
+    final trimmedUrl = imageUrl.trim();
+    if (trimmedUrl.isEmpty) {
+      return;
+    }
+
+    final caption = alt?.trim();
+
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'image_preview',
+      barrierColor: Colors.black.withValues(alpha: 0.92),
+      transitionDuration: const Duration(milliseconds: 180),
+      pageBuilder: (dialogContext, _, __) {
+        final size = MediaQuery.sizeOf(dialogContext);
+        final maxWidth = size.width * 0.94;
+        final maxHeight = size.height * 0.86;
+
+        return Material(
+          color: Colors.transparent,
+          child: SafeArea(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: GestureDetector(
+                    onTap: () => Navigator.of(dialogContext).maybePop(),
+                    child: const SizedBox.expand(),
+                  ),
+                ),
+                Center(
+                  child: GestureDetector(
+                    onTap: () {},
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: maxWidth,
+                        maxHeight: maxHeight,
+                      ),
+                      child: InteractiveViewer(
+                        minScale: 1,
+                        maxScale: 4,
+                        child: CachedNetworkImage(
+                          imageUrl: trimmedUrl,
+                          memCacheWidth: 1600,
+                          fit: BoxFit.contain,
+                          placeholder:
+                              (context, url) => const Center(
+                                child: M3ELoadingIndicator(size: 24),
+                              ),
+                          errorWidget:
+                              (context, url, error) => Icon(
+                                Icons.broken_image_outlined,
+                                color: Colors.white.withValues(alpha: 0.85),
+                                size: 40,
+                              ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: IconButton(
+                    onPressed: () => Navigator.of(dialogContext).maybePop(),
+                    icon: const Icon(Icons.close),
+                    color: Colors.white,
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.black.withValues(alpha: 0.35),
+                    ),
+                  ),
+                ),
+                if (caption != null && caption.isNotEmpty)
+                  Positioned(
+                    left: 24,
+                    right: 24,
+                    bottom: 16,
+                    child: Text(
+                      caption,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.96, end: 1).animate(curved),
+            child: child,
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _jumpToBlockIndex(int index, {double alignment = 0.0}) async {
@@ -1423,6 +1954,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
     // 自定义样式构建器
     // 自定义样式构建器
+    // ignore: unused_element
     Map<String, String>? customStylesBuilder(dom.Element element) {
       // 1. 处理浮动类名 (Common in Web novels)
       if (element.classes.contains('fr')) {
@@ -1528,6 +2060,81 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     }
 
     // 通用 Widget 构建器 (图片缓存)
+    Map<String, String>? readerCustomStylesBuilder(dom.Element element) {
+      void mergeStyle(
+        Map<String, String> target,
+        Map<String, String>? incoming,
+      ) {
+        if (incoming != null && incoming.isNotEmpty) {
+          target.addAll(incoming);
+        }
+      }
+
+      if (element.localName == 'img') {
+        final style = <String, String>{};
+        mergeStyle(style, _buildReaderPresetClassStyles(element));
+        style['border-radius'] = '3px';
+        final isInsideTable = _isInsideTableStructure(element);
+        final isInsideIllustration = _isInsideIllustrationContainer(element);
+
+        final parent = element.parent;
+        final parentTag = parent?.localName;
+        final inlineStyle = (element.attributes['style'] ?? '').toLowerCase();
+        final isFloating =
+            element.attributes['align']?.isNotEmpty == true ||
+            inlineStyle.contains('float') ||
+            element.classes.contains('fr') ||
+            element.classes.contains('fl') ||
+            (parent != null &&
+                (parent.classes.contains('fr') ||
+                    parent.classes.contains('fl')));
+        if (isFloating) {
+          return style.isEmpty ? null : style;
+        }
+
+        if (isInsideIllustration) {
+          style.addAll({
+            'width': 'auto',
+            'height': 'auto',
+            'max-width': '100%',
+            'display': 'inline-block',
+            'margin': '0',
+            'padding': '0',
+          });
+          return style;
+        }
+
+        if (isInsideTable) {
+          style.addAll({
+            'width': 'auto',
+            'height': 'auto',
+            'display': 'inline-block',
+            'margin': '0',
+            'padding': '0',
+          });
+          return style;
+        }
+
+        style.addAll({
+          'width': 'auto',
+          'height': 'auto',
+          'max-width': '100%',
+          'margin':
+              parentTag == 'p' || parentTag == 'div' || parentTag == 'blockquote'
+                  ? '0 5px'
+                  : '0',
+          'padding': '0',
+          'display': 'inline-block',
+        });
+        return style;
+      }
+
+      final style = <String, String>{};
+      mergeStyle(style, _buildReaderBlockTagStyles(element, readerLineHeight));
+      mergeStyle(style, _buildReaderPresetClassStyles(element));
+      return style.isEmpty ? null : style;
+    }
+
     Widget? customWidgetBuilder(dom.Element element) {
       // 0) 脚注/注释触发点（对标 Web: a.duokan-footnote）
       // Web 用 <a.duokan-footnote href="#noteX"><sup><img class="footnote" .../></sup></a>
@@ -1565,6 +2172,10 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
           // 检查是否在浮动容器中 (向上查找 3 层)
           bool isFloating = false;
           bool isFloatRight = false;
+          final isInsideTable = _isInsideTableStructure(element);
+          final isInsideIllustration = _isInsideIllustrationContainer(element);
+          final isPreviewable = _isPreviewableReaderImage(element);
+          final parentTag = element.parent?.localName;
           dom.Element? current = element;
           for (int i = 0; i < 3; i++) {
             if (current == null) break;
@@ -1589,6 +2200,71 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
               break;
             }
             current = current.parent;
+          }
+
+          if (!isFloating && !isInsideTable && !isInsideIllustration) {
+            double? parseDimension(String? rawValue) {
+              if (rawValue == null) {
+                return null;
+              }
+              final trimmed = rawValue.trim();
+              if (trimmed.isEmpty) {
+                return null;
+              }
+              return double.tryParse(trimmed);
+            }
+
+            final width = parseDimension(element.attributes['width']);
+            final height = parseDimension(element.attributes['height']);
+            final horizontalMargin =
+                parentTag == 'p' || parentTag == 'div' || parentTag == 'blockquote'
+                ? 5.0
+                : 0.0;
+
+            return InlineCustomWidget(
+              alignment: PlaceholderAlignment.baseline,
+              baseline: TextBaseline.alphabetic,
+              child: Builder(
+                builder: (context) {
+                  final maxWidth = MediaQuery.sizeOf(context).width - 32;
+                  return Padding(
+                    padding: EdgeInsets.symmetric(horizontal: horizontalMargin),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: maxWidth),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(3),
+                        clipBehavior: Clip.antiAlias,
+                        child: CachedNetworkImage(
+                          imageUrl: src,
+                          memCacheWidth: 1080,
+                          width: width,
+                          height: height,
+                          fit: BoxFit.contain,
+                          placeholder:
+                              (context, url) => SizedBox(
+                                width: width ?? 40,
+                                height: height ?? 40,
+                                child: const Center(
+                                  child: M3ELoadingIndicator(size: 16),
+                                ),
+                              ),
+                          errorWidget:
+                              (context, url, error) => SizedBox(
+                                width: width ?? 40,
+                                height: height ?? 40,
+                                child: Icon(
+                                  Icons.broken_image,
+                                  color: readerTextColor.withValues(alpha: 0.3),
+                                  size: 18,
+                                ),
+                              ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            );
           }
 
           final cachedRatio =
@@ -1639,6 +2315,23 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
 
             // 如果已经有了真实比例缓存，我们就用真实比例
             // 如果尚无真实比例，则暂时不使用外包裹高度防止拉伸（因为 ImageStream 正在后台加载并会在不久后触发 setState）
+            if (isInsideTable) {
+              return SizedBox(
+                width: 48,
+                height: 48,
+                child: Center(
+                  child:
+                      isError
+                          ? Icon(
+                            Icons.broken_image,
+                            color: readerTextColor.withValues(alpha: 0.3),
+                            size: 20,
+                          )
+                          : const M3ELoadingIndicator(size: 18),
+                ),
+              );
+            }
+
             Widget indicator = Center(
               child:
                   isError
@@ -1689,14 +2382,23 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                     (context, url, error) => buildPlaceholder(isError: true),
                 fit: BoxFit.contain,
                 // 如果是浮动元素，强制限制宽度 (避免过大)
-                width: isFloating ? null : double.infinity,
+                width: (isFloating || isInsideTable)
+                    ? null
+                    : double.infinity,
               );
             },
           );
 
           // 核心方案：如果在缓存中取到了真实比例，用 AspectRatio 死死地锁住图片
           // 这能保证即便这部分并未进入视图而被懒加载剔除骨架，SliverList 的估算也能精准无比！
-          if (cachedRatio != null && !isFloating) {
+          imageWidget = ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: imageWidget,
+          );
+
+          if (cachedRatio != null &&
+              !isFloating &&
+              !isInsideTable) {
             imageWidget = AspectRatio(
               aspectRatio: cachedRatio,
               child: imageWidget,
@@ -1716,6 +2418,36 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                 ),
                 child: imageWidget,
               ),
+            );
+          }
+
+          if (isInsideTable) {
+            return Builder(
+              builder: (context) {
+                final maxWidth = (MediaQuery.sizeOf(context).width - 32)
+                    .clamp(48.0, double.infinity);
+                return ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: maxWidth),
+                  child: imageWidget,
+                );
+              },
+            );
+          }
+
+          if (isPreviewable) {
+            final alt = element.attributes['alt'];
+            return Builder(
+              builder: (context) {
+                return GestureDetector(
+                  onTap:
+                      () => _showReaderImagePreview(
+                        context,
+                        imageUrl: src,
+                        alt: alt,
+                      ),
+                  child: imageWidget,
+                );
+              },
             );
           }
 
@@ -1751,7 +2483,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                   height: readerLineHeight,
                   color: readerTextColor,
                 ),
-                customStylesBuilder: customStylesBuilder,
+                customStylesBuilder: readerCustomStylesBuilder,
                 customWidgetBuilder: customWidgetBuilder,
               ),
             ),
@@ -1779,7 +2511,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                     height: readerLineHeight,
                     color: readerTextColor,
                   ),
-                  customStylesBuilder: customStylesBuilder,
+                  customStylesBuilder: readerCustomStylesBuilder,
                   customWidgetBuilder: customWidgetBuilder,
                 ),
               );
