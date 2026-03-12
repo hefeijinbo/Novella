@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:novella/core/network/backend_request_identity.dart';
 import 'package:signalr_netcore/ihub_protocol.dart';
 
 const backendHost = 'api.lightnovel.life';
@@ -29,6 +30,7 @@ class BackendUserAgent {
         onRequest: (options, handler) async {
           if (_shouldAttach(options.uri)) {
             options.headers['User-Agent'] = await value;
+            options.headers['x-id'] = await BackendRequestIdentity.deviceId;
           }
           handler.next(options);
         },
