@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:novella/features/settings/settings_provider.dart';
 import 'package:novella/features/settings/widgets/settings_ui_helper.dart';
+import 'package:novella/src/widgets/book_type_badge.dart';
 
 import 'package:novella/features/settings/widgets/settings_header_card.dart';
 
@@ -140,10 +141,10 @@ class ContentSettingsPage extends ConsumerWidget {
                 onTap: () => _showModuleOrderSheet(context),
               ),
 
-              // 类型标记
+              // 类型徽章
               ListTile(
                 leading: const Icon(Icons.bookmark_border),
-                title: const Text('类型标记'),
+                title: const Text('类型徽章'),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -183,8 +184,9 @@ class ContentSettingsPage extends ConsumerWidget {
   void _showContentFilterSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      useSafeArea: true,
+      useSafeArea: false,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (context) {
         return Consumer(
           builder: (context, ref, _) {
@@ -193,106 +195,113 @@ class ContentSettingsPage extends ConsumerWidget {
             final colorScheme = Theme.of(context).colorScheme;
 
             return SafeArea(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    child: Text(
-                      '书籍过滤',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
+              top: false,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      child: Text(
+                        '书籍过滤',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                    child: Text(
-                      '仅对首页推荐和搜索生效',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      child: Text(
+                        '仅对首页推荐和搜索生效',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
-                  ),
-                  ListTile(
-                    leading: Icon(
-                      Icons.translate,
-                      color:
-                          settings.ignoreJapanese
-                              ? colorScheme.primary
-                              : colorScheme.onSurfaceVariant,
-                    ),
-                    title: Text(
-                      '忽略日语小说',
-                      style: TextStyle(
+                    ListTile(
+                      leading: Icon(
+                        Icons.translate,
                         color:
                             settings.ignoreJapanese
                                 ? colorScheme.primary
-                                : null,
-                        fontWeight:
-                            settings.ignoreJapanese ? FontWeight.bold : null,
+                                : colorScheme.onSurfaceVariant,
                       ),
-                    ),
-                    trailing: Switch(
-                      value: settings.ignoreJapanese,
-                      onChanged: (value) => notifier.setIgnoreJapanese(value),
-                    ),
-                    onTap:
-                        () => notifier.setIgnoreJapanese(
-                          !settings.ignoreJapanese,
+                      title: Text(
+                        '忽略日语小说',
+                        style: TextStyle(
+                          color:
+                              settings.ignoreJapanese
+                                  ? colorScheme.primary
+                                  : null,
+                          fontWeight:
+                              settings.ignoreJapanese ? FontWeight.bold : null,
                         ),
-                  ),
-                  ListTile(
-                    leading: Icon(
-                      Icons.smart_toy_outlined,
-                      color:
-                          settings.ignoreAI
-                              ? colorScheme.primary
-                              : colorScheme.onSurfaceVariant,
-                    ),
-                    title: Text(
-                      '忽略 AI 生成',
-                      style: TextStyle(
-                        color: settings.ignoreAI ? colorScheme.primary : null,
-                        fontWeight: settings.ignoreAI ? FontWeight.bold : null,
                       ),
+                      trailing: Switch(
+                        value: settings.ignoreJapanese,
+                        onChanged: (value) => notifier.setIgnoreJapanese(value),
+                      ),
+                      onTap:
+                          () => notifier.setIgnoreJapanese(
+                            !settings.ignoreJapanese,
+                          ),
                     ),
-                    trailing: Switch(
-                      value: settings.ignoreAI,
-                      onChanged: (value) => notifier.setIgnoreAI(value),
-                    ),
-                    onTap: () => notifier.setIgnoreAI(!settings.ignoreAI),
-                  ),
-                  ListTile(
-                    leading: Icon(
-                      Icons.lock_outline,
-                      color:
-                          settings.ignoreLevel6
-                              ? colorScheme.primary
-                              : colorScheme.onSurfaceVariant,
-                    ),
-                    title: Text(
-                      '忽略 Level 6 书籍',
-                      style: TextStyle(
+                    ListTile(
+                      leading: Icon(
+                        Icons.smart_toy_outlined,
                         color:
-                            settings.ignoreLevel6 ? colorScheme.primary : null,
-                        fontWeight:
-                            settings.ignoreLevel6 ? FontWeight.bold : null,
+                            settings.ignoreAI
+                                ? colorScheme.primary
+                                : colorScheme.onSurfaceVariant,
                       ),
+                      title: Text(
+                        '忽略 AI 生成',
+                        style: TextStyle(
+                          color: settings.ignoreAI ? colorScheme.primary : null,
+                          fontWeight:
+                              settings.ignoreAI ? FontWeight.bold : null,
+                        ),
+                      ),
+                      trailing: Switch(
+                        value: settings.ignoreAI,
+                        onChanged: (value) => notifier.setIgnoreAI(value),
+                      ),
+                      onTap: () => notifier.setIgnoreAI(!settings.ignoreAI),
                     ),
-                    trailing: Switch(
-                      value: settings.ignoreLevel6,
-                      onChanged: (value) => notifier.setIgnoreLevel6(value),
+                    ListTile(
+                      leading: Icon(
+                        Icons.lock_outline,
+                        color:
+                            settings.ignoreLevel6
+                                ? colorScheme.primary
+                                : colorScheme.onSurfaceVariant,
+                      ),
+                      title: Text(
+                        '忽略 Level 6 书籍',
+                        style: TextStyle(
+                          color:
+                              settings.ignoreLevel6
+                                  ? colorScheme.primary
+                                  : null,
+                          fontWeight:
+                              settings.ignoreLevel6 ? FontWeight.bold : null,
+                        ),
+                      ),
+                      trailing: Switch(
+                        value: settings.ignoreLevel6,
+                        onChanged: (value) => notifier.setIgnoreLevel6(value),
+                      ),
+                      onTap:
+                          () =>
+                              notifier.setIgnoreLevel6(!settings.ignoreLevel6),
                     ),
-                    onTap:
-                        () => notifier.setIgnoreLevel6(!settings.ignoreLevel6),
-                  ),
-                  const SizedBox(height: 16),
-                ],
+                    const SizedBox(height: 16),
+                  ],
+                ),
               ),
             );
           },
@@ -330,7 +339,7 @@ class ContentSettingsPage extends ConsumerWidget {
 
     showModalBottomSheet(
       context: context,
-      useSafeArea: true,
+      useSafeArea: false,
       showDragHandle: true,
       isScrollControlled: true,
       builder: (context) {
@@ -549,8 +558,9 @@ class ContentSettingsPage extends ConsumerWidget {
 
     showModalBottomSheet(
       context: context,
-      useSafeArea: true,
+      useSafeArea: false,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (context) {
         return Consumer(
           builder: (context, ref, _) {
@@ -560,84 +570,192 @@ class ContentSettingsPage extends ConsumerWidget {
             final textTheme = Theme.of(context).textTheme;
 
             return SafeArea(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    child: Text(
-                      '类型标记',
-                      style: textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
+              top: false,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
                       ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                    child: Text(
-                      '在封面右下角显示书籍类型图标（录入/翻译/转载）',
-                      style: textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                  ...allScopes.map((scopeId) {
-                    final isEnabled = settings.bookTypeBadgeScopes.contains(
-                      scopeId,
-                    );
-                    return ListTile(
-                      leading: Icon(
-                        scopeIcons[scopeId],
-                        color:
-                            isEnabled
-                                ? colorScheme.primary
-                                : colorScheme.onSurfaceVariant,
-                      ),
-                      title: Text(
-                        scopeLabels[scopeId] ?? scopeId,
-                        style: TextStyle(
-                          color: isEnabled ? colorScheme.primary : null,
-                          fontWeight: isEnabled ? FontWeight.bold : null,
+                      child: Text(
+                        '类型徽章',
+                        style: textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                      trailing: Switch(
-                        value: isEnabled,
-                        onChanged: (value) {
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      child: Text(
+                        '在封面右下角显示书籍类型徽章',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.info_outline),
+                      title: const Text('查看所有徽章释义'),
+                      subtitle: const Text('了解当前 APP 支持显示的全部类型'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => _showBookTypeBadgeLegendSheet(context),
+                    ),
+                    ...allScopes.map((scopeId) {
+                      final isEnabled = settings.bookTypeBadgeScopes.contains(
+                        scopeId,
+                      );
+                      return ListTile(
+                        leading: Icon(
+                          scopeIcons[scopeId],
+                          color:
+                              isEnabled
+                                  ? colorScheme.primary
+                                  : colorScheme.onSurfaceVariant,
+                        ),
+                        title: Text(
+                          scopeLabels[scopeId] ?? scopeId,
+                          style: TextStyle(
+                            color: isEnabled ? colorScheme.primary : null,
+                            fontWeight: isEnabled ? FontWeight.bold : null,
+                          ),
+                        ),
+                        trailing: Switch(
+                          value: isEnabled,
+                          onChanged: (value) {
+                            final newScopes = List<String>.from(
+                              settings.bookTypeBadgeScopes,
+                            );
+                            if (value) {
+                              if (!newScopes.contains(scopeId)) {
+                                newScopes.add(scopeId);
+                              }
+                            } else {
+                              newScopes.remove(scopeId);
+                            }
+                            notifier.setBookTypeBadgeScopes(newScopes);
+                          },
+                        ),
+                        onTap: () {
                           final newScopes = List<String>.from(
                             settings.bookTypeBadgeScopes,
                           );
-                          if (value) {
-                            if (!newScopes.contains(scopeId)) {
-                              newScopes.add(scopeId);
-                            }
-                          } else {
+                          if (isEnabled) {
                             newScopes.remove(scopeId);
+                          } else {
+                            newScopes.add(scopeId);
                           }
                           notifier.setBookTypeBadgeScopes(newScopes);
                         },
-                      ),
-                      onTap: () {
-                        final newScopes = List<String>.from(
-                          settings.bookTypeBadgeScopes,
-                        );
-                        if (isEnabled) {
-                          newScopes.remove(scopeId);
-                        } else {
-                          newScopes.add(scopeId);
-                        }
-                        notifier.setBookTypeBadgeScopes(newScopes);
-                      },
-                    );
-                  }),
-                  const SizedBox(height: 16),
-                ],
+                      );
+                    }),
+                    const SizedBox(height: 16),
+                  ],
+                ),
               ),
             );
           },
+        );
+      },
+    );
+  }
+
+  void _showBookTypeBadgeLegendSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      useSafeArea: false,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) {
+        final colorScheme = Theme.of(context).colorScheme;
+        final textTheme = Theme.of(context).textTheme;
+
+        return SafeArea(
+          top: false,
+          bottom: false,
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.72,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  child: Text(
+                    '徽章释义',
+                    style: textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Text(
+                    '以下展示的是 APP 当前会显示的全部书籍类型徽章',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                    itemCount: bookTypeBadgeDefinitions.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final definition = bookTypeBadgeDefinitions[index];
+                      return Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: 44,
+                              child: Center(
+                                child: BookTypeBadgeIcon(
+                                  icon: definition.icon,
+                                  backgroundColor: definition.backgroundColor,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    definition.label,
+                                    style: textTheme.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    definition.meaning,
+                                    style: textTheme.bodyMedium?.copyWith(
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
         );
       },
     );
