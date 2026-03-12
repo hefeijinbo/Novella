@@ -279,6 +279,10 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
+    final appUiFontAsync = ref.watch(appUiFontFamilyProvider);
+    final appUiFontFamily =
+        appUiFontAsync.asData?.value ??
+        (Platform.isWindows ? 'Microsoft YaHei' : null);
 
     return DynamicColorBuilder(
       builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
@@ -370,7 +374,7 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
             Locale('en', ''), // English
           ],
           theme: ThemeData(
-            fontFamily: Platform.isWindows ? 'Microsoft YaHei' : null,
+            fontFamily: appUiFontFamily,
             colorScheme: lightScheme,
             useMaterial3: true,
             textTheme: const TextTheme(
@@ -388,7 +392,7 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
             ),
           ),
           darkTheme: ThemeData(
-            fontFamily: Platform.isWindows ? 'Microsoft YaHei' : null,
+            fontFamily: appUiFontFamily,
             colorScheme: darkScheme,
             scaffoldBackgroundColor: settings.oledBlack ? Colors.black : null,
             useMaterial3: true,

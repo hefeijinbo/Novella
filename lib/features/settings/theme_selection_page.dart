@@ -134,7 +134,9 @@ class _ThemeSelectionPageState extends ConsumerState<ThemeSelectionPage> {
         final previewTheme = ThemeData(
           useMaterial3: true,
           colorScheme: previewColorScheme,
-          fontFamily: Platform.isWindows ? 'Microsoft YaHei' : null,
+          fontFamily:
+              Theme.of(context).textTheme.bodyMedium?.fontFamily ??
+              (Platform.isWindows ? 'Microsoft YaHei' : null),
         );
 
         // 整个页面使用 AnimatedTheme 实现平滑过渡
@@ -665,7 +667,9 @@ class _ThemeSelectionPageState extends ConsumerState<ThemeSelectionPage> {
                 color: colors.onSurfaceVariant,
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
-                fontFamily: Platform.isWindows ? 'Microsoft YaHei' : null,
+                fontFamily:
+                    Theme.of(context).textTheme.bodyMedium?.fontFamily ??
+                    (Platform.isWindows ? 'Microsoft YaHei' : null),
               ),
               isDense: true,
               borderRadius: BorderRadius.circular(12),

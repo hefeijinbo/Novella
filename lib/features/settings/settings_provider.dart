@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:adaptive_platform_ui/adaptive_platform_ui.dart';
+import 'package:novella/core/utils/app_ui_font_manager.dart';
 import 'package:novella/features/book/book_detail_page.dart'
     show BookDetailPageState;
 import 'package:novella/data/services/book_info_cache_service.dart';
@@ -15,6 +16,9 @@ class AppSettings {
   final bool readerFirstLineIndent;
   final double readerLineHeight;
   final String theme; // 'system'（系统）, 'light'（浅色）, 'dark'（深色）
+  final String appFontFamily;
+  final String appFontFileName;
+  final String appFontLabel;
   final String version; // App 版本号
   final String convertType; // 'none'（关闭）, 't2s'（繁转简）, 's2t'（简转繁）
   final bool fontCacheEnabled;
@@ -73,6 +77,9 @@ class AppSettings {
     this.readerFirstLineIndent = false,
     this.readerLineHeight = 1.6,
     this.theme = 'system',
+    this.appFontFamily = '',
+    this.appFontFileName = '',
+    this.appFontLabel = '',
     this.version = '', // 默认空，加载后更新
     this.convertType = 'none',
     this.fontCacheEnabled = true,
@@ -110,12 +117,18 @@ class AppSettings {
   /// 是否使用 iOS 18 样式
   bool get useIOS18Style => iosDisplayStyle == 'ios18' && Platform.isIOS;
 
+  bool get hasCustomAppFont =>
+      appFontFamily.isNotEmpty && appFontFileName.isNotEmpty;
+
   AppSettings copyWith({
     bool? isLoaded,
     double? fontSize,
     bool? readerFirstLineIndent,
     double? readerLineHeight,
     String? theme,
+    String? appFontFamily,
+    String? appFontFileName,
+    String? appFontLabel,
     String? version,
     String? convertType,
     bool? fontCacheEnabled,
@@ -153,6 +166,9 @@ class AppSettings {
           readerFirstLineIndent ?? this.readerFirstLineIndent,
       readerLineHeight: readerLineHeight ?? this.readerLineHeight,
       theme: theme ?? this.theme,
+      appFontFamily: appFontFamily ?? this.appFontFamily,
+      appFontFileName: appFontFileName ?? this.appFontFileName,
+      appFontLabel: appFontLabel ?? this.appFontLabel,
       version: version ?? this.version,
       convertType: convertType ?? this.convertType,
       fontCacheEnabled: fontCacheEnabled ?? this.fontCacheEnabled,
@@ -231,6 +247,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
           prefs.getBool('setting_readerFirstLineIndent') ?? false,
       readerLineHeight: prefs.getDouble('setting_readerLineHeight') ?? 1.6,
       theme: prefs.getString('setting_theme') ?? 'system',
+      appFontFamily: prefs.getString('setting_appFontFamily') ?? '',
+      appFontFileName: prefs.getString('setting_appFontFileName') ?? '',
+      appFontLabel: prefs.getString('setting_appFontLabel') ?? '',
       version: packageInfo.version,
       convertType: prefs.getString('setting_convertType') ?? 'none',
       fontCacheEnabled: prefs.getBool('setting_fontCacheEnabled') ?? true,
@@ -297,6 +316,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
     );
     await prefs.setDouble('setting_readerLineHeight', state.readerLineHeight);
     await prefs.setString('setting_theme', state.theme);
+    await prefs.setString('setting_appFontFamily', state.appFontFamily);
+    await prefs.setString('setting_appFontFileName', state.appFontFileName);
+    await prefs.setString('setting_appFontLabel', state.appFontLabel);
     await prefs.setString('setting_convertType', state.convertType);
     await prefs.setBool('setting_fontCacheEnabled', state.fontCacheEnabled);
     await prefs.setInt('setting_fontCacheLimit', state.fontCacheLimit);
@@ -375,6 +397,32 @@ class SettingsNotifier extends Notifier<AppSettings> {
     // 清除书籍详情页缓存以强制重新提取新主题的颜色
     BookDetailPageState.clearColorCache();
     BookInfoCacheService().clear();
+  }
+
+  Future<void> setAppUiFont({
+    required String fontFamily,
+    required String fileName,
+    required String label,
+  }) async {
+    state = state.copyWith(
+      appFontFamily: fontFamily,
+      appFontFileName: fileName,
+      appFontLabel: label,
+    );
+    await _save();
+    await AppUiFontManager().pruneFonts(keepFileNames: <String>{fileName});
+  }
+
+  Future<void> clearAppUiFont() async {
+    final previousFileName = state.appFontFileName;
+    state = state.copyWith(
+      appFontFamily: '',
+      appFontFileName: '',
+      appFontLabel: '',
+    );
+    await _save();
+    await AppUiFontManager().deleteFont(previousFileName);
+    await AppUiFontManager().pruneFonts();
   }
 
   void setConvertType(String type) {
@@ -594,3 +642,24 @@ class SettingsNotifier extends Notifier<AppSettings> {
 final settingsProvider = NotifierProvider<SettingsNotifier, AppSettings>(
   SettingsNotifier.new,
 );
+
+final appUiFontFamilyProvider = FutureProvider<String?>((ref) async {
+  final (isLoaded, fontFamily, fileName) = ref.watch(
+    settingsProvider.select(
+      (settings) => (
+        settings.isLoaded,
+        settings.appFontFamily,
+        settings.appFontFileName,
+      ),
+    ),
+  );
+
+  if (!isLoaded || fontFamily.isEmpty || fileName.isEmpty) {
+    return null;
+  }
+
+  return AppUiFontManager().loadFont(
+    fontFamily: fontFamily,
+    fileName: fileName,
+  );
+});
