@@ -1,5 +1,7 @@
 # 📚 Novella
 
+<a href="https://trendshift.io/repositories/22931" target="_blank"><img src="https://trendshift.io/api/badge/repositories/22931" alt="Kanscape%2FNovella | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+
 ![Flutter](https://img.shields.io/badge/Flutter-02569B?logo=flutter&logoColor=white)
 ![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)
 ![License](https://img.shields.io/badge/License-AGPL%203.0-blue)
