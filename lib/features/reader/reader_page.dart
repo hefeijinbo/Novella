@@ -2844,7 +2844,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                           minWidth: 140,
                         ), // 最小宽度
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
                           vertical: 10,
                         ),
                         decoration: BoxDecoration(
@@ -2860,70 +2859,65 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                           crossAxisAlignment: CrossAxisAlignment.center,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            // 章节标题（支持简化）
-                            Text(
-                              _loading
-                                  ? '加载中'
-                                  : (() {
-                                    String title = _chapter?.title ?? '';
-                                    if (title.isNotEmpty &&
-                                        settings.cleanChapterTitle) {
-                                      // 混合正则：
-                                      // 处理 【第一话】 或非英文前缀
-                                      // 处理 『「〈 分隔符
-                                      // 保留纯英文标题
-                                      final regex = RegExp(
-                                        r'^\s*(?:【([^】]*)】.*|(?![a-zA-Z]+\s)([^\s『「〈]+)[\s『「〈].*)$',
-                                      );
-                                      final match = regex.firstMatch(title);
-                                      if (match != null) {
-                                        final extracted =
-                                            (match.group(1) ?? '') +
-                                            (match.group(2) ?? '');
-                                        if (extracted.isNotEmpty) {
-                                          title = extracted;
-                                        }
-                                      }
-                                    }
-                                    return title;
-                                  })(),
-                              style: Theme.of(
-                                context,
-                              ).textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w600,
-                                color: textColor,
+                            // 章节标题（支持简化 + 长标题跑马灯滚动 + 点击显示完整标题）
+                            GestureDetector(
+                              onTap: () {
+                                final fullTitle = _chapter?.title;
+                                if (fullTitle != null && fullTitle.isNotEmpty) {
+                                  ScaffoldMessenger.of(context)
+                                    ..hideCurrentSnackBar()
+                                    ..showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          fullTitle,
+                                          style: const TextStyle(fontSize: 14),
+                                        ),
+                                        behavior: SnackBarBehavior.floating,
+                                        duration: const Duration(seconds: 4),
+                                      ),
+                                    );
+                                }
+                              },
+                              child: _MarqueeText(
+                                text: _getDisplayTitle(settings),
+                                horizontalPadding: 16.0,
+                                style: Theme.of(
+                                  context,
+                                ).textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: textColor,
+                                ),
                               ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              textAlign: TextAlign.center,
                             ),
                             const SizedBox(height: 2),
                             // 阅读进度（clamp 确保 0-100%）
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                SizedBox(
-                                  width: 70, // 加宽以容纳长文本
-                                  child: ValueListenableBuilder<String>(
-                                    valueListenable: _timeStringNotifier,
-                                    builder: (context, timeString, _) {
-                                      return Text(
-                                        timeString,
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.bodySmall?.copyWith(
-                                          color: subTextColor,
-                                          fontSize: 11,
-                                          // height: 1,
-                                        ),
-                                        textAlign:
-                                            TextAlign.right, // 靠右对齐，紧贴电量条
-                                      );
-                                    },
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  SizedBox(
+                                    width: 70, // 加宽以容纳长文本
+                                    child: ValueListenableBuilder<String>(
+                                      valueListenable: _timeStringNotifier,
+                                      builder: (context, timeString, _) {
+                                        return Text(
+                                          timeString,
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.bodySmall?.copyWith(
+                                            color: subTextColor,
+                                            fontSize: 11,
+                                            // height: 1,
+                                          ),
+                                          textAlign:
+                                              TextAlign.right, // 靠右对齐，紧贴电量条
+                                        );
+                                      },
+                                    ),
                                   ),
-                                ),
                                 const SizedBox(width: 8),
 
                                 // IOS: 自定义电池条
@@ -3029,7 +3023,8 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
                                 ),
                               ],
                             ),
-                          ],
+                          ),
+                        ],
                         ),
                       ),
                     );
@@ -3444,6 +3439,30 @@ class _ReaderPageState extends ConsumerState<ReaderPage>
     );
   }
 
+  /// 获取当前显示用的章节标题（根据设置可能简化）。
+  String _getDisplayTitle(AppSettings settings) {
+    if (_loading) return '加载中';
+    String title = _chapter?.title ?? '';
+    if (title.isNotEmpty && settings.cleanChapterTitle) {
+      // 混合正则：
+      // 处理 【第一话】 或非英文前缀
+      // 处理 『「〈 分隔符
+      // 保留纯英文标题
+      final regex = RegExp(
+        r'^\s*(?:【([^】]*)】.*|(?![a-zA-Z]+\s)([^\s『「〈]+)[\s『「〈].*)$',
+      );
+      final match = regex.firstMatch(title);
+      if (match != null) {
+        final extracted =
+            (match.group(1) ?? '') + (match.group(2) ?? '');
+        if (extracted.isNotEmpty) {
+          title = extracted;
+        }
+      }
+    }
+    return title;
+  }
+
   Widget _buildErrorView() {
     return Center(
       child: Column(
@@ -3823,6 +3842,204 @@ class _FootnoteAnchorState extends State<_FootnoteAnchor>
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 跑马灯文本组件：当文本超出容器宽度时，无限循环滚动（头尾视觉衔接），只在起始位置停顿。
+class _MarqueeText extends StatefulWidget {
+  final String text;
+  final TextStyle? style;
+  final double horizontalPadding;
+
+  const _MarqueeText({
+    required this.text,
+    this.style,
+    this.horizontalPadding = 0.0,
+  });
+
+  @override
+  State<_MarqueeText> createState() => _MarqueeTextState();
+}
+
+class _MarqueeTextState extends State<_MarqueeText>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  Timer? _pauseTimer;
+  bool _disposed = false;
+
+  // 测量结果
+  double _textWidth = 0;
+  double _textHeight = 0;
+  double _containerWidth = 0;
+  bool _needsScroll = false;
+
+  // 两份文本之间的间距
+  static const double _gap = 48.0;
+  // 滚动速度
+  static const double _scrollSpeed = 30.0; // px/s
+  // 起始位置停顿时间
+  static const Duration _pauseDuration = Duration(seconds: 2);
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this);
+    _controller.addStatusListener(_onAnimationStatus);
+  }
+
+  @override
+  void didUpdateWidget(covariant _MarqueeText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text || oldWidget.style != widget.style) {
+      _stopAnimation();
+      // 重置测量缓存，让 LayoutBuilder 重新触发
+      _textWidth = 0;
+      _containerWidth = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _pauseTimer?.cancel();
+    _controller.removeStatusListener(_onAnimationStatus);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onAnimationStatus(AnimationStatus status) {
+    if (_disposed || !mounted) return;
+    if (status == AnimationStatus.completed) {
+      // 一轮滚动完成，跳回起点并停顿
+      _controller.value = 0.0;
+      _pauseTimer = Timer(_pauseDuration, () => _startScroll());
+    }
+  }
+
+  void _measure(double containerW) {
+    if (_disposed || !mounted) return;
+
+    final textPainter = TextPainter(
+      text: TextSpan(text: widget.text, style: widget.style),
+      maxLines: 1,
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    final tw = textPainter.width;
+    final th = textPainter.height;
+    textPainter.dispose();
+
+    // 考虑两侧需要保留的 padding，可用宽度需减去它们
+    final shouldScroll = tw > (containerW - 2 * widget.horizontalPadding);
+
+    if (tw != _textWidth || containerW != _containerWidth) {
+      _textWidth = tw;
+      _textHeight = th;
+      _containerWidth = containerW;
+
+      _stopAnimation();
+      if (shouldScroll != _needsScroll) {
+        setState(() {
+          _needsScroll = shouldScroll;
+        });
+      }
+      if (shouldScroll) {
+        _pauseTimer = Timer(_pauseDuration, () => _startScroll());
+      }
+    }
+  }
+
+  void _stopAnimation() {
+    _pauseTimer?.cancel();
+    _pauseTimer = null;
+    _controller.stop();
+    _controller.value = 0.0;
+  }
+
+  void _startScroll() {
+    if (_disposed || !mounted || !_needsScroll) return;
+
+    // 滚动距离 = 文本宽度 + 间距（第一份文本移出并在原地由第二份文本替代所需要的偏移量）
+    final scrollDistance = _textWidth + _gap;
+    final durationMs = (scrollDistance / _scrollSpeed * 1000).round();
+
+    _controller.duration = Duration(milliseconds: durationMs);
+    _controller.forward(from: 0.0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 在 build 后测量（避免在 build 中直接 setState）
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!_disposed && mounted) {
+            _measure(constraints.maxWidth);
+          }
+        });
+
+        if (!_needsScroll) {
+          // 短标题：静态居中显示（保持原有行为）
+          return Padding(
+            padding: EdgeInsets.symmetric(horizontal: widget.horizontalPadding),
+            child: Text(
+              widget.text,
+              style: widget.style,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+            ),
+          );
+        }
+
+        // 长标题：无限循环滚动
+        // 核心：SizedBox 固定容器大小 → ClipRect 按容器裁剪 → OverflowBox 放开子级约束
+        final scrollDistance = _textWidth + _gap;
+
+        return SizedBox(
+          width: constraints.maxWidth,
+          height: _textHeight > 0 ? _textHeight : null,
+          child: ClipRect(
+            child: OverflowBox(
+              maxWidth: double.infinity,
+              alignment: Alignment.centerLeft,
+              child: AnimatedBuilder(
+                animation: _controller,
+                builder: (context, child) {
+                  final offset = _controller.value * scrollDistance;
+                  return Transform.translate(
+                    offset: Offset(-offset, 0),
+                    child: child,
+                  );
+                },
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 提供起始位置的留白
+                    SizedBox(width: widget.horizontalPadding),
+                    Text(
+                      widget.text,
+                      style: widget.style,
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
+                    SizedBox(width: _gap),
+                    Text(
+                      widget.text,
+                      style: widget.style,
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
+                    // 给结尾也补个留白，防止截断
+                    SizedBox(width: widget.horizontalPadding),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
