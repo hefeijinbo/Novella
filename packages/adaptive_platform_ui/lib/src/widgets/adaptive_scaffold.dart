@@ -112,6 +112,25 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
   final GlobalKey<_MinimizableTabBarState> _tabBarKey =
       GlobalKey<_MinimizableTabBarState>();
 
+  Widget _buildAppBarTitle(String title, {TextStyle? style}) {
+    final text = Text(
+      title,
+      style: style,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+    final onTitleTap = widget.appBar?.onTitleTap;
+    if (onTitleTap == null) {
+      return text;
+    }
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTitleTap,
+      child: text,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final useNativeToolbar = widget.appBar?.useNativeToolbar ?? false;
@@ -170,6 +189,7 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
         ),
         bottomNavigationBar: widget.bottomNavigationBar,
         title: widget.appBar?.title,
+        onTitleTap: widget.appBar?.onTitleTap,
         actions: widget.appBar?.actions,
         leading: widget.appBar?.leading,
         minimizeBehavior: widget.minimizeBehavior,
@@ -232,7 +252,7 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
                 ? false
                 : true, // Let CupertinoNavigationBar handle back button for iOS < 26
             middle: widget.appBar!.title != null
-                ? Text(widget.appBar!.title!)
+                ? _buildAppBarTitle(widget.appBar!.title!)
                 : null,
             trailing:
                 widget.appBar!.actions != null &&
@@ -431,7 +451,7 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
               ? false
               : true, // Let CupertinoNavigationBar handle back button for iOS < 26
           middle: widget.appBar!.title != null
-              ? Text(widget.appBar!.title!)
+              ? _buildAppBarTitle(widget.appBar!.title!)
               : null,
           trailing:
               widget.appBar!.actions != null &&
@@ -514,7 +534,7 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
               widget.appBar!.leading != null)) {
         appBar = AppBar(
           title: widget.appBar!.title != null
-              ? Text(widget.appBar!.title!)
+              ? _buildAppBarTitle(widget.appBar!.title!)
               : null,
           actions: widget.appBar!.actions?.map((action) {
             if (action.title != null) {
@@ -611,7 +631,7 @@ class _AdaptiveScaffoldState extends State<AdaptiveScaffold> {
     else if (widget.appBar != null) {
       appBar = AppBar(
         title: widget.appBar!.title != null
-            ? Text(widget.appBar!.title!)
+            ? _buildAppBarTitle(widget.appBar!.title!)
             : null,
         actions: widget.appBar!.actions?.map((action) {
           if (action.title != null) {

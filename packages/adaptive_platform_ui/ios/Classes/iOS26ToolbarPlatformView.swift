@@ -108,6 +108,7 @@ class iOS26ToolbarPlatformView: NSObject, FlutterPlatformView {
         var items: [UIBarButtonItem] = []
 
         let hasTitle = params["title"] as? String != nil && !(params["title"] as? String ?? "").isEmpty
+        let titleTapEnabled = params["titleTapEnabled"] as? Bool ?? false
         let hasActions = params["actions"] as? [[String: Any]] != nil && !(params["actions"] as? [[String: Any]] ?? []).isEmpty
         let hasLeading = params["leading"] != nil
 
@@ -199,6 +200,10 @@ class iOS26ToolbarPlatformView: NSObject, FlutterPlatformView {
                         titleLabel.text = title
                         titleLabel.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
                         titleLabel.textAlignment = .center
+                        if titleTapEnabled {
+                            titleLabel.isUserInteractionEnabled = true
+                            titleLabel.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(titleTapped)))
+                        }
 
                         let titleSize = (title as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: 17, weight: .semibold)])
                         titleLabel.frame = CGRect(x: 0, y: 0, width: max(titleSize.width, 200), height: 44)
@@ -227,6 +232,10 @@ class iOS26ToolbarPlatformView: NSObject, FlutterPlatformView {
                         titleLabel.text = title
                         titleLabel.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
                         titleLabel.textAlignment = .left
+                        if titleTapEnabled {
+                            titleLabel.isUserInteractionEnabled = true
+                            titleLabel.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(titleTapped)))
+                        }
                         titleLabel.sizeToFit()
 
                         let titleItem = UIBarButtonItem(customView: titleLabel)
@@ -256,6 +265,10 @@ class iOS26ToolbarPlatformView: NSObject, FlutterPlatformView {
                     titleLabel.text = title
                     titleLabel.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
                     titleLabel.textAlignment = .left
+                    if titleTapEnabled {
+                        titleLabel.isUserInteractionEnabled = true
+                        titleLabel.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(titleTapped)))
+                    }
                     titleLabel.sizeToFit()
 
                     let titleItem = UIBarButtonItem(customView: titleLabel)
@@ -278,6 +291,10 @@ class iOS26ToolbarPlatformView: NSObject, FlutterPlatformView {
         // Use the tag to get the action index
         let actionIndex = sender.tag
         _channel.invokeMethod("onActionTapped", arguments: ["index": actionIndex])
+    }
+
+    @objc private func titleTapped() {
+        _channel.invokeMethod("onTitleTapped", arguments: nil)
     }
 
     private func handleMethodCall(_ call: FlutterMethodCall, result: @escaping FlutterResult) {

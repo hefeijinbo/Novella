@@ -9,12 +9,15 @@ import 'package:novella/features/book/book_detail_page.dart'
     show BookDetailPageState;
 import 'package:novella/data/services/book_info_cache_service.dart';
 
+enum ReaderViewMode { scroll, paged }
+
 /// 设置状态模型
 class AppSettings {
   final bool isLoaded;
   final double fontSize;
   final bool readerFirstLineIndent;
   final double readerLineHeight;
+  final ReaderViewMode readerViewMode;
   final String theme; // 'system'（系统）, 'light'（浅色）, 'dark'（深色）
   final String appFontFamily;
   final String appFontFileName;
@@ -76,6 +79,7 @@ class AppSettings {
     this.fontSize = 18.0,
     this.readerFirstLineIndent = false,
     this.readerLineHeight = 1.6,
+    this.readerViewMode = ReaderViewMode.scroll,
     this.theme = 'system',
     this.appFontFamily = '',
     this.appFontFileName = '',
@@ -125,6 +129,7 @@ class AppSettings {
     double? fontSize,
     bool? readerFirstLineIndent,
     double? readerLineHeight,
+    ReaderViewMode? readerViewMode,
     String? theme,
     String? appFontFamily,
     String? appFontFileName,
@@ -165,6 +170,7 @@ class AppSettings {
       readerFirstLineIndent:
           readerFirstLineIndent ?? this.readerFirstLineIndent,
       readerLineHeight: readerLineHeight ?? this.readerLineHeight,
+      readerViewMode: readerViewMode ?? this.readerViewMode,
       theme: theme ?? this.theme,
       appFontFamily: appFontFamily ?? this.appFontFamily,
       appFontFileName: appFontFileName ?? this.appFontFileName,
@@ -246,6 +252,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
       readerFirstLineIndent:
           prefs.getBool('setting_readerFirstLineIndent') ?? false,
       readerLineHeight: prefs.getDouble('setting_readerLineHeight') ?? 1.6,
+      readerViewMode: _parseReaderViewMode(
+        prefs.getString('setting_readerViewMode'),
+      ),
       theme: prefs.getString('setting_theme') ?? 'system',
       appFontFamily: prefs.getString('setting_appFontFamily') ?? '',
       appFontFileName: prefs.getString('setting_appFontFileName') ?? '',
@@ -315,6 +324,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
       state.readerFirstLineIndent,
     );
     await prefs.setDouble('setting_readerLineHeight', state.readerLineHeight);
+    await prefs.setString('setting_readerViewMode', state.readerViewMode.name);
     await prefs.setString('setting_theme', state.theme);
     await prefs.setString('setting_appFontFamily', state.appFontFamily);
     await prefs.setString('setting_appFontFileName', state.appFontFileName);
@@ -388,6 +398,11 @@ class SettingsNotifier extends Notifier<AppSettings> {
 
   void setReaderLineHeight(double value) {
     state = state.copyWith(readerLineHeight: value.clamp(1.2, 2.4).toDouble());
+    _save();
+  }
+
+  void setReaderViewMode(ReaderViewMode value) {
+    state = state.copyWith(readerViewMode: value);
     _save();
   }
 
@@ -636,6 +651,20 @@ class SettingsNotifier extends Notifier<AppSettings> {
     state = state.copyWith(ignoredUpdateVersion: version);
     _save();
   }
+}
+
+ReaderViewMode _parseReaderViewMode(String? raw) {
+  if (raw == null || raw.isEmpty) {
+    return ReaderViewMode.scroll;
+  }
+
+  for (final mode in ReaderViewMode.values) {
+    if (mode.name == raw) {
+      return mode;
+    }
+  }
+
+  return ReaderViewMode.scroll;
 }
 
 /// 设置提供者

@@ -14,6 +14,7 @@ class IOS26NativeToolbar extends StatefulWidget {
     this.title,
     this.leading,
     this.leadingText,
+    this.onTitleTap,
     this.actions,
     this.onLeadingTap,
     this.onActionTap,
@@ -24,6 +25,7 @@ class IOS26NativeToolbar extends StatefulWidget {
   final String? title;
   final Widget? leading;
   final String? leadingText;
+  final VoidCallback? onTitleTap;
   final List<AdaptiveAppBarAction>? actions;
   final VoidCallback? onLeadingTap;
   final ValueChanged<int>? onActionTap;
@@ -50,6 +52,7 @@ class _IOS26NativeToolbarState extends State<IOS26NativeToolbar> {
     // If custom leading widget provided, don't send leadingText to native
     final creationParams = <String, dynamic>{
       if (widget.title != null) 'title': widget.title!,
+      'titleTapEnabled': widget.onTitleTap != null,
       if (widget.leading == null && widget.leadingText != null)
         'leading': widget.leadingText!,
       if (widget.actions != null && widget.actions!.isNotEmpty)
@@ -136,6 +139,9 @@ class _IOS26NativeToolbarState extends State<IOS26NativeToolbar> {
           }
         }
         break;
+      case 'onTitleTapped':
+        widget.onTitleTap?.call();
+        break;
     }
   }
 
@@ -162,9 +168,13 @@ class _IOS26NativeToolbarState extends State<IOS26NativeToolbar> {
           if (widget.leading != null) widget.leading!,
           const Spacer(),
           if (widget.title != null)
-            Text(
-              widget.title!,
-              style: CupertinoTheme.of(context).textTheme.navTitleTextStyle,
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: widget.onTitleTap,
+              child: Text(
+                widget.title!,
+                style: CupertinoTheme.of(context).textTheme.navTitleTextStyle,
+              ),
             ),
           const Spacer(),
           if (widget.actions != null && widget.actions!.isNotEmpty)

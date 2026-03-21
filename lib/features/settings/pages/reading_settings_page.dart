@@ -11,6 +11,10 @@ class ReadingSettingsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(settingsProvider);
     final notifier = ref.read(settingsProvider.notifier);
+    const readerViewModeLabels = {
+      ReaderViewMode.scroll: '滑动翻页',
+      ReaderViewMode.paged: '左右翻页',
+    };
 
     return Scaffold(
       body: CustomScrollView(
@@ -56,6 +60,27 @@ class ReadingSettingsPage extends ConsumerWidget {
                     onChanged: (value) => notifier.setReaderLineHeight(value),
                   ),
                 ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.swap_horiz),
+                title: const Text('阅读方式'),
+                subtitle: Text(
+                  readerViewModeLabels[settings.readerViewMode] ?? '滑动翻页',
+                ),
+                trailing: const Icon(Icons.chevron_right, size: 20),
+                onTap:
+                    () => SettingsUIHelper.showSelectionSheet<ReaderViewMode>(
+                      context: context,
+                      title: '阅读方式',
+                      subtitle: '选择滑动滚动或左右翻页',
+                      currentValue: settings.readerViewMode,
+                      options: readerViewModeLabels,
+                      icons: const {
+                        ReaderViewMode.scroll: Icons.swap_vert,
+                        ReaderViewMode.paged: Icons.menu_book,
+                      },
+                      onSelected: notifier.setReaderViewMode,
+                    ),
               ),
               ListTile(
                 leading: const Icon(Icons.translate),

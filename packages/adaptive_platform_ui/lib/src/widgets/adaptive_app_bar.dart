@@ -18,6 +18,7 @@ class AdaptiveAppBar {
   /// Creates an adaptive app bar configuration
   const AdaptiveAppBar({
     this.title,
+    this.onTitleTap,
     this.actions,
     this.leading,
     this.useNativeToolbar = true,
@@ -27,6 +28,12 @@ class AdaptiveAppBar {
 
   /// Title for the app bar
   final String? title;
+
+  /// Callback when the title is tapped.
+  ///
+  /// This is supported by the native iOS 26 toolbar as well as the Cupertino
+  /// and Material fallbacks built by [AdaptiveScaffold].
+  final VoidCallback? onTitleTap;
 
   /// Action buttons in the app bar
   /// - iOS 26+ with native toolbar: Rendered as native UIBarButtonItem in UIToolbar
@@ -67,6 +74,7 @@ class AdaptiveAppBar {
   /// Creates a copy of this app bar with the given fields replaced
   AdaptiveAppBar copyWith({
     String? title,
+    VoidCallback? onTitleTap,
     List<AdaptiveAppBarAction>? actions,
     Widget? leading,
     bool? useNativeToolbar,
@@ -75,6 +83,7 @@ class AdaptiveAppBar {
   }) {
     return AdaptiveAppBar(
       title: title ?? this.title,
+      onTitleTap: onTitleTap ?? this.onTitleTap,
       actions: actions ?? this.actions,
       leading: leading ?? this.leading,
       useNativeToolbar: useNativeToolbar ?? this.useNativeToolbar,

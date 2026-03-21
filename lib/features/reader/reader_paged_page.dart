@@ -1,0 +1,1668 @@
+import 'dart:async';
+
+import 'package:adaptive_platform_ui/adaptive_platform_ui.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
+import 'package:html/dom.dart' as dom;
+import 'package:html/parser.dart' as html_parser;
+import 'package:novella/core/utils/font_manager.dart';
+import 'package:novella/core/utils/xpath_utils.dart';
+import 'package:novella/core/widgets/m3e_loading_indicator.dart';
+import 'package:novella/data/services/chapter_service.dart';
+import 'package:novella/data/services/reading_progress_service.dart';
+import 'package:novella/data/services/reading_time_service.dart';
+import 'package:novella/features/reader/reader_background_page.dart';
+import 'package:novella/features/reader/shared/reader_chapter_sheet.dart';
+import 'package:novella/features/reader/shared/reader_image_view.dart';
+import 'package:novella/features/reader/shared/reader_text_sanitizer.dart';
+import 'package:novella/features/reader/shared/reader_title_utils.dart';
+import 'package:novella/features/settings/settings_provider.dart';
+
+class _ReaderBlock {
+  final String html;
+  final String xPath;
+  final String cleanXPath;
+  final int textLength;
+  final int imageCount;
+  const _ReaderBlock(
+    this.html,
+    this.xPath,
+    this.cleanXPath,
+    this.textLength,
+    this.imageCount,
+  );
+}
+
+class _ReaderPageSlice {
+  final int start;
+  final int end;
+  final String xPath;
+  final String html;
+  const _ReaderPageSlice(this.start, this.end, this.xPath, this.html);
+}
+
+class ReaderPagedPage extends ConsumerStatefulWidget {
+  final int bid;
+  final int sortNum;
+  final int totalChapters;
+  final String? coverUrl;
+  final String? bookTitle;
+  final bool allowServerOverrideOnOpen;
+  const ReaderPagedPage({
+    super.key,
+    required this.bid,
+    required this.sortNum,
+    required this.totalChapters,
+    this.coverUrl,
+    this.bookTitle,
+    this.allowServerOverrideOnOpen = false,
+  });
+
+  @override
+  ConsumerState<ReaderPagedPage> createState() => _ReaderPagedPageState();
+}
+
+class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage> {
+  static const _blockTags = {
+    'p',
+    'div',
+    'img',
+    'table',
+    'h1',
+    'h2',
+    'h3',
+    'h4',
+    'h5',
+    'h6',
+    'li',
+    'blockquote',
+    'hr',
+  };
+  static const _tableRelatedTags = {
+    'table',
+    'thead',
+    'tbody',
+    'tfoot',
+    'tr',
+    'td',
+    'th',
+    'caption',
+  };
+  static const _previewImageContainerClasses = {
+    'duokan-image-single',
+    'image-preview',
+    'illus',
+  };
+  final _chapterService = ChapterService();
+  final _fontManager = FontManager();
+  final _progressService = ReadingProgressService();
+  final _readingTimeService = ReadingTimeService();
+  final _pageController = PageController();
+  ChapterContent? _chapter;
+  List<_ReaderBlock> _blocks = const [];
+  Map<String, int> _indexByXPath = const {};
+  String? _fontFamily;
+  String? _error;
+  String? _pendingRestoreXPath;
+  String _currentXPath = '//*';
+  String _lastLayoutKey = '';
+  String _lastMeasureKey = '';
+  Map<int, double> _measuredBlockHeights = const {};
+  bool _loading = true;
+  int _currentPage = 0;
+  late int _targetSortNum;
+  int _loadVersion = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _targetSortNum = widget.sortNum;
+    _loadChapter(widget.sortNum);
+    _readingTimeService.startSession();
+  }
+
+  @override
+  void dispose() {
+    unawaited(_savePosition(immediate: true));
+    _readingTimeService.endSession();
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _savePosition({bool immediate = false, String? xPath}) async {
+    final chapter = _chapter;
+    if (chapter == null) return;
+    final currentXPath = xPath ?? _currentXPath;
+    await _progressService.saveLocalPosition(
+      bookId: widget.bid,
+      chapterId: chapter.id,
+      sortNum: chapter.sortNum,
+      xPath: currentXPath,
+      title: widget.bookTitle,
+      cover: widget.coverUrl,
+      chapterTitle: chapter.title,
+      immediate: immediate,
+    );
+    await _progressService.saveReadPosition(
+      bookId: widget.bid,
+      chapterId: chapter.id,
+      xPath: currentXPath,
+    );
+  }
+
+  Future<void> _loadChapter(int sortNum) async {
+    final version = ++_loadVersion;
+    if (_chapter != null) unawaited(_savePosition());
+    setState(() {
+      _loading = true;
+      _error = null;
+      _pendingRestoreXPath = null;
+      _currentPage = 0;
+      _currentXPath = '//*';
+      _lastLayoutKey = '';
+      _lastMeasureKey = '';
+      _measuredBlockHeights = const {};
+    });
+    try {
+      final settings = ref.read(settingsProvider);
+      final chapter = await _chapterService.getNovelContent(
+        widget.bid,
+        sortNum,
+        convert: settings.convertType == 'none' ? null : settings.convertType,
+      );
+      if (version != _loadVersion) return;
+      final fontFamily =
+          chapter.fontUrl == null
+              ? null
+              : await _fontManager.loadFont(
+                chapter.fontUrl,
+                cacheEnabled: settings.fontCacheEnabled,
+                cacheLimit: settings.fontCacheLimit,
+              );
+      if (version != _loadVersion) return;
+      final invisibleCodepoints = _fontManager.getInvisibleCodepoints(
+        fontFamily,
+      );
+      final sanitizedContent = sanitizeReaderHtmlTextNodes(
+        chapter.content,
+        invisibleCodepoints,
+      );
+      final blocks = _buildBlocks(sanitizedContent);
+      final localPosition = await _progressService.getLocalPosition(widget.bid);
+      if (!mounted || version != _loadVersion) return;
+      setState(() {
+        _chapter = chapter;
+        _fontFamily = fontFamily;
+        _blocks = blocks.$1;
+        _indexByXPath = blocks.$2;
+        _loading = false;
+        _targetSortNum = sortNum;
+        _currentXPath = _blocks.isEmpty ? '//*' : _blocks.first.xPath;
+        _pendingRestoreXPath =
+            localPosition != null && localPosition.sortNum == chapter.sortNum
+                ? localPosition.xPath
+                : _currentXPath;
+      });
+    } catch (e) {
+      if (!mounted || version != _loadVersion) return;
+      setState(() {
+        _loading = false;
+        _error = '$e';
+      });
+    }
+  }
+
+  (List<_ReaderBlock>, Map<String, int>) _buildBlocks(String html) {
+    final blocks = <_ReaderBlock>[];
+    final indexByXPath = <String, int>{};
+    void add(dom.Element element, String rawXPath) {
+      final cleanXPath = XPathUtils.cleanXPath(rawXPath);
+      final textLength = _normalizeText(element.text).length;
+      final imageCount =
+          element.localName == 'img'
+              ? 1
+              : element.getElementsByTagName('img').length;
+      indexByXPath.putIfAbsent(cleanXPath, () => blocks.length);
+      blocks.add(
+        _ReaderBlock(
+          element.outerHtml,
+          rawXPath,
+          cleanXPath,
+          textLength,
+          imageCount,
+        ),
+      );
+    }
+
+    void walk(dom.Node node, String currentPath) {
+      if (node is! dom.Element) return;
+      final tag = node.localName ?? '';
+      int index = 1;
+      final parent = node.parentNode;
+      if (parent != null) {
+        for (final sibling in parent.nodes) {
+          if (sibling == node) break;
+          if (sibling is dom.Element && sibling.localName == tag) index++;
+        }
+      }
+      final path =
+          currentPath.isEmpty
+              ? '//*/$tag[$index]'
+              : '$currentPath/$tag[$index]';
+      if (_shouldUseAsBlock(node)) {
+        add(node, path);
+        return;
+      }
+      for (final child in node.nodes) {
+        walk(child, path);
+      }
+    }
+
+    final fragment = html_parser.parseFragment(html);
+    for (final node in fragment.nodes) {
+      walk(node, '');
+    }
+    if (blocks.isEmpty) {
+      final wrapper = dom.Element.tag('div')..innerHtml = html;
+      add(wrapper, '//*');
+    }
+    return (blocks, indexByXPath);
+  }
+
+  String _normalizeText(String text) {
+    return normalizeReaderText(text);
+  }
+
+  bool _shouldUseAsBlock(dom.Element element) {
+    final tag = element.localName ?? '';
+    if (!_blockTags.contains(tag)) return false;
+    final style = (element.attributes['style'] ?? '').toLowerCase();
+    if (style.contains('display:none') || style.contains('display: none')) {
+      return false;
+    }
+    if (tag == 'img' || tag == 'hr' || tag == 'table') return true;
+    if (tag == 'div') {
+      if (_isStandaloneIllustrationContainer(element)) {
+        return true;
+      }
+      final hasDirectBlockChild = element.nodes.any(
+        (node) => node is dom.Element && _blockTags.contains(node.localName),
+      );
+      if (hasDirectBlockChild) return false;
+    }
+    return _normalizeText(element.text).isNotEmpty ||
+        element.getElementsByTagName('img').isNotEmpty ||
+        element.getElementsByTagName('br').isNotEmpty;
+  }
+
+  bool _hasAncestorTag(
+    dom.Element element,
+    Set<String> tags, {
+    int maxDepth = 8,
+  }) {
+    dom.Element? current = element.parent;
+    var depth = 0;
+    while (current != null && depth < maxDepth) {
+      if (tags.contains(current.localName)) {
+        return true;
+      }
+      current = current.parent;
+      depth++;
+    }
+    return false;
+  }
+
+  bool _isInsideTableStructure(dom.Element element) {
+    return _hasAncestorTag(element, _tableRelatedTags);
+  }
+
+  ({bool isFloating, bool isFloatRight}) _resolveFloatingImage(
+    dom.Element element,
+  ) {
+    dom.Element? current = element;
+    for (var i = 0; i < 3 && current != null; i++) {
+      final style = (current.attributes['style'] ?? '').toLowerCase();
+      final align = (current.attributes['align'] ?? '').toLowerCase();
+      final classes = current.classes;
+      if (style.contains('float: right') ||
+          align == 'right' ||
+          classes.contains('fr')) {
+        return (isFloating: true, isFloatRight: true);
+      }
+      if (style.contains('float: left') ||
+          align == 'left' ||
+          classes.contains('fl')) {
+        return (isFloating: true, isFloatRight: false);
+      }
+      current = current.parent;
+    }
+    return (isFloating: false, isFloatRight: false);
+  }
+
+  double? _parseDimension(String? rawValue) {
+    if (rawValue == null) {
+      return null;
+    }
+    final trimmed = rawValue.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    final match = RegExp(r'(\d+(?:\.\d+)?)').firstMatch(trimmed);
+    if (match == null) {
+      return null;
+    }
+    return double.tryParse(match.group(1)!);
+  }
+
+  String _formatEmValue(double value) {
+    final rounded = value.toStringAsFixed(1);
+    return rounded.endsWith('.0') ? '${value.toInt()}em' : '${rounded}em';
+  }
+
+  String? _fontSizeFromPresetClass(Iterable<String> classes) {
+    final emClassPattern = RegExp(r'^em(\d{2})$');
+    for (final className in classes) {
+      final match = emClassPattern.firstMatch(className);
+      if (match == null) {
+        continue;
+      }
+
+      final rawValue = int.tryParse(match.group(1)!);
+      if (rawValue == null || rawValue < 5 || rawValue > 30) {
+        continue;
+      }
+
+      return _formatEmValue(rawValue / 10);
+    }
+
+    return null;
+  }
+
+  bool _isFootnoteMarkerImage(dom.Element img) {
+    if (img.classes.contains('footnote')) {
+      return true;
+    }
+
+    dom.Element? current = img.parent;
+    while (current != null) {
+      if (current.localName == 'a' &&
+          current.classes.contains('duokan-footnote')) {
+        return true;
+      }
+      current = current.parent;
+    }
+
+    return false;
+  }
+
+  bool _isIllustrationContainer(dom.Element element) {
+    return element.classes.contains('illus') ||
+        element.classes.contains('illu') ||
+        element.classes.contains('duokan-image-single');
+  }
+
+  bool _isPreviewImageContainer(dom.Element? element) {
+    if (element == null) {
+      return false;
+    }
+    return element.classes.any(_previewImageContainerClasses.contains);
+  }
+
+  bool _hasNonFootnoteImage(dom.Element element) {
+    return element
+        .getElementsByTagName('img')
+        .any((img) => !_isFootnoteMarkerImage(img));
+  }
+
+  bool _isImageOnlyBlockContainer(dom.Element element) {
+    return _hasNonFootnoteImage(element) &&
+        _normalizeText(element.text).isEmpty;
+  }
+
+  bool _isStandaloneIllustrationContainer(dom.Element element) {
+    if (element.localName != 'div') {
+      return false;
+    }
+    if (!_isIllustrationContainer(element) &&
+        !_isPreviewImageContainer(element)) {
+      return false;
+    }
+    if (_normalizeText(element.text).isNotEmpty) {
+      return false;
+    }
+
+    final images =
+        element
+            .getElementsByTagName('img')
+            .where((img) => !_isFootnoteMarkerImage(img))
+            .toList();
+    return images.length == 1;
+  }
+
+  bool _shouldRenderAsIllustrationBlock(dom.Element element) {
+    return _isIllustrationContainer(element) ||
+        _isPreviewImageContainer(element) ||
+        _isImageOnlyBlockContainer(element);
+  }
+
+  bool _isPreviewableReaderImage(dom.Element element) {
+    if (element.localName != 'img' || element.classes.contains('no-preview')) {
+      return false;
+    }
+    return _isPreviewImageContainer(element.parent);
+  }
+
+  bool _hasFullWidthStyle(dom.Element element) {
+    final style = (element.attributes['style'] ?? '').toLowerCase().replaceAll(
+      ' ',
+      '',
+    );
+    return style.contains('width:100%') || style.contains('width:100%;');
+  }
+
+  double? _imageAspectRatio(double? width, double? height) {
+    if (width == null || height == null || width <= 0 || height <= 0) {
+      return null;
+    }
+    return width / height;
+  }
+
+  Widget? _buildIllustrationContainerWidget(
+    dom.Element element,
+    Color textColor,
+  ) {
+    if (!_isStandaloneIllustrationContainer(element)) {
+      return null;
+    }
+
+    final images =
+        element
+            .getElementsByTagName('img')
+            .where((img) => !_isFootnoteMarkerImage(img))
+            .toList();
+    if (images.length != 1) {
+      return null;
+    }
+
+    final image = images.first;
+    final src = image.attributes['src']?.trim();
+    if (src == null || src.isEmpty) {
+      return null;
+    }
+
+    final aspectRatio = _imageAspectRatio(
+      _parseDimension(image.attributes['width']),
+      _parseDimension(image.attributes['height']),
+    );
+    final fullWidth = _hasFullWidthStyle(element) || _hasFullWidthStyle(image);
+    final previewable = _isPreviewableReaderImage(image);
+    final alt = image.attributes['alt'];
+
+    return Builder(
+      builder: (context) {
+        final maxWidth = (MediaQuery.sizeOf(context).width - 48).clamp(
+          48.0,
+          double.infinity,
+        );
+        Widget child = ReaderRoundedNetworkImage(
+          imageUrl: src,
+          alt: alt,
+          errorColor: textColor,
+          borderRadius: 4,
+          previewable: previewable,
+        );
+
+        if (aspectRatio != null) {
+          child = AspectRatio(aspectRatio: aspectRatio, child: child);
+        }
+
+        child =
+            fullWidth
+                ? SizedBox(width: maxWidth, child: child)
+                : ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: maxWidth),
+                  child: child,
+                );
+
+        return Align(alignment: Alignment.center, child: child);
+      },
+    );
+  }
+
+  Widget? _buildImageWidget(dom.Element element, Color textColor) {
+    if (element.localName != 'img') {
+      return null;
+    }
+
+    final src = element.attributes['src']?.trim();
+    if (src == null || src.isEmpty) {
+      return null;
+    }
+
+    final alt = element.attributes['alt'];
+    final width = _parseDimension(element.attributes['width']);
+    final height = _parseDimension(element.attributes['height']);
+    final aspectRatio = _imageAspectRatio(width, height);
+    final parentTag = element.parent?.localName;
+    final insideTable = _isInsideTableStructure(element);
+    final insideIllustration = _isInsideIllustrationContainer(element);
+    final floating = _resolveFloatingImage(element);
+    final isPreviewable = _isPreviewableReaderImage(element);
+
+    if (floating.isFloating) {
+      return Align(
+        alignment:
+            floating.isFloatRight
+                ? Alignment.centerRight
+                : Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 160),
+          child: ReaderRoundedNetworkImage(
+            imageUrl: src,
+            alt: alt,
+            width: width,
+            height: height,
+            errorColor: textColor,
+            borderRadius: 4,
+            previewable: isPreviewable,
+          ),
+        ),
+      );
+    }
+
+    final horizontalPadding =
+        parentTag == 'p' || parentTag == 'div' || parentTag == 'blockquote'
+            ? 5.0
+            : 0.0;
+
+    Widget buildResponsiveImage(
+      BuildContext context, {
+      EdgeInsetsGeometry padding = EdgeInsets.zero,
+      double? maxWidth,
+    }) {
+      Widget image = ReaderRoundedNetworkImage(
+        imageUrl: src,
+        alt: alt,
+        errorColor: textColor,
+        borderRadius: 4,
+        previewable: isPreviewable,
+      );
+
+      if (aspectRatio != null && !insideTable) {
+        image = AspectRatio(aspectRatio: aspectRatio, child: image);
+      }
+
+      if (maxWidth != null) {
+        image = ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxWidth),
+          child: image,
+        );
+      }
+
+      if (padding != EdgeInsets.zero) {
+        image = Padding(padding: padding, child: image);
+      }
+
+      return image;
+    }
+
+    if (!insideTable && !insideIllustration) {
+      return InlineCustomWidget(
+        alignment: PlaceholderAlignment.baseline,
+        baseline: TextBaseline.alphabetic,
+        child: Builder(
+          builder: (context) {
+            final maxWidth = (MediaQuery.sizeOf(context).width - 48).clamp(
+              48.0,
+              double.infinity,
+            );
+            return buildResponsiveImage(
+              context,
+              maxWidth: maxWidth,
+              padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+            );
+          },
+        ),
+      );
+    }
+
+    return Builder(
+      builder: (context) {
+        final maxWidth =
+            insideTable
+                ? null
+                : (MediaQuery.sizeOf(context).width - 48).clamp(
+                  48.0,
+                  double.infinity,
+                );
+        return buildResponsiveImage(
+          context,
+          maxWidth: maxWidth,
+          padding:
+              insideIllustration
+                  ? EdgeInsets.zero
+                  : EdgeInsets.symmetric(horizontal: horizontalPadding),
+        );
+      },
+    );
+  }
+
+  bool _isInsideIllustrationContainer(dom.Element element) {
+    dom.Element? current = element.parent;
+    var depth = 0;
+    while (current != null && depth < 3) {
+      if (_isIllustrationContainer(current) ||
+          _isPreviewImageContainer(current)) {
+        return true;
+      }
+      current = current.parent;
+      depth++;
+    }
+    return false;
+  }
+
+  Map<String, String>? _buildReaderBlockTagStyles(
+    dom.Element element,
+    double readerLineHeight,
+  ) {
+    final tag = element.localName;
+    if (tag == null) {
+      return null;
+    }
+
+    if (tag == 'body') {
+      return {
+        'margin': '0',
+        'padding': '0',
+        'line-height': readerLineHeight.toStringAsFixed(1),
+      };
+    }
+
+    final textTags = {
+      'p',
+      'div',
+      'blockquote',
+      'h1',
+      'h2',
+      'h3',
+      'h4',
+      'h5',
+      'h6',
+      'center',
+    };
+    if (!textTags.contains(tag)) {
+      return null;
+    }
+
+    if (_shouldRenderAsIllustrationBlock(element)) {
+      return {
+        'margin': '0',
+        'padding': '0',
+        'line-height': '0',
+        'text-align': 'center',
+      };
+    }
+
+    switch (tag) {
+      case 'h1':
+        return {
+          'font-size': '1.65em',
+          'line-height': '120%',
+          'text-align': 'center',
+          'font-weight': 'bold',
+          'margin-top': '0.1em',
+          'margin-bottom': '0.4em',
+        };
+      case 'h2':
+        return {
+          'font-size': '1.25em',
+          'line-height': '120%',
+          'text-align': 'center',
+          'font-weight': 'bold',
+          'margin-top': '0.3em',
+          'margin-bottom': '0.5em',
+        };
+      case 'h3':
+        return {
+          'font-size': '0.95em',
+          'line-height': '120%',
+          'text-align': 'center',
+          'font-weight': 'bold',
+          'text-indent': '0',
+          'margin-top': '0.2em',
+          'margin-bottom': '0.2em',
+        };
+      case 'h4':
+        return {
+          'font-size': '1.5em',
+          'font-weight': 'bold',
+          'text-indent': '1.333em',
+          'margin-top': '0.5em',
+          'margin-bottom': '1em',
+        };
+      case 'center':
+        return {
+          'margin': '0',
+          'line-height': readerLineHeight.toStringAsFixed(1),
+          'text-align': 'center',
+          'text-indent': '0',
+        };
+      default:
+        return {'line-height': readerLineHeight.toStringAsFixed(1)};
+    }
+  }
+
+  Map<String, String>? _buildReaderPresetClassStyles(dom.Element element) {
+    final classes = element.classes;
+    if (classes.isEmpty) {
+      return null;
+    }
+
+    final style = <String, String>{};
+    final presetFontSize = _fontSizeFromPresetClass(classes);
+    if (presetFontSize != null) {
+      style['font-size'] = presetFontSize;
+    }
+
+    if (classes.contains('pius1') ||
+        classes.contains('pius2') ||
+        classes.contains('ph4')) {
+      style.addAll({
+        'font-size': '1.5em',
+        'font-weight': 'bold',
+        'text-indent': '1.333em',
+        'margin-top': '0.5em',
+        'margin-bottom': '1em',
+      });
+    }
+
+    if (classes.contains('right')) {
+      style.addAll({'text-indent': '0', 'text-align': 'right'});
+    }
+    if (classes.contains('left')) {
+      style.addAll({'text-indent': '0', 'text-align': 'left'});
+    }
+    if (classes.contains('center')) {
+      style.addAll({'text-indent': '0', 'text-align': 'center'});
+    }
+    if (classes.contains('zin')) {
+      style['text-indent'] = '0';
+    }
+    if (classes.contains('bold')) {
+      style['font-weight'] = 'bold';
+    }
+    if (classes.contains('ita')) {
+      style['font-style'] = 'italic';
+    }
+    if (classes.contains('stress')) {
+      style.addAll({
+        'font-weight': 'bold',
+        'font-size': '1.1em',
+        'margin-top': '0.3em',
+        'margin-bottom': '0.3em',
+      });
+    }
+    if (classes.contains('author')) {
+      style.addAll({
+        'font-size': '1.2em',
+        'text-align': 'right',
+        'font-weight': 'bold',
+        'font-style': 'italic',
+        'margin-right': '1em',
+        'text-indent': '0',
+      });
+    }
+    if (classes.contains('message') || classes.contains('cut-line')) {
+      style.addAll({
+        'text-indent': '0',
+        'line-height': '1.2em',
+        'margin-top': '0.2em',
+        'margin-bottom': '0.2em',
+      });
+    }
+    if (classes.contains('meg')) {
+      style.addAll({
+        'font-size': '1.3em',
+        'line-height': '1.3em',
+        'margin-top': '0.5em',
+        'margin-bottom': '0',
+        'text-indent': '0',
+      });
+    }
+    if (classes.contains('lh')) {
+      style['line-height'] = '1em';
+    }
+    if (classes.contains('m0')) {
+      style['margin'] = '0';
+    }
+    if (classes.contains('p0')) {
+      style['padding'] = '0';
+    }
+
+    if (classes.contains('red')) {
+      style['color'] = '#ff0000';
+    }
+    if (classes.contains('green')) {
+      style['color'] = '#00ff00';
+    }
+    if (classes.contains('blue')) {
+      style['color'] = '#0000ff';
+    }
+    if (classes.contains('black')) {
+      style['color'] = '#000000';
+    }
+    if (classes.contains('white')) {
+      style['color'] = '#ffffff';
+    }
+
+    if (classes.contains('fl')) {
+      style.addAll({'float': 'left', 'margin-right': '0.5em', 'padding': '0'});
+    }
+    if (classes.contains('fr')) {
+      style.addAll({'float': 'right', 'margin-left': '0.5em', 'padding': '0'});
+    }
+    if (classes.contains('cl')) {
+      style['clear'] = 'left';
+    }
+    if (classes.contains('cr')) {
+      style['clear'] = 'right';
+    }
+    if (classes.contains('cb')) {
+      style['clear'] = 'both';
+    }
+    if (classes.contains('vt')) {
+      style['vertical-align'] = 'top';
+    }
+    if (classes.contains('vb')) {
+      style['vertical-align'] = 'bottom';
+    }
+    if (classes.contains('vm')) {
+      style['vertical-align'] = 'middle';
+    }
+    if (classes.contains('no-d')) {
+      style['text-decoration'] = 'none';
+    }
+    if (classes.contains('bc')) {
+      style['border-collapse'] = 'collapse';
+    }
+    if (classes.contains('dash-break')) {
+      style['word-break'] = 'break-all';
+      style['word-wrap'] = 'break-word';
+    }
+    if (classes.contains('dot') || classes.contains('em-dot')) {
+      style['text-decoration-line'] = 'underline';
+      style['text-decoration-style'] = 'dotted';
+    }
+    if (_isIllustrationContainer(element) ||
+        _isPreviewImageContainer(element)) {
+      style.addAll({
+        'text-align': 'center',
+        'padding-top': '2px',
+        'padding-bottom': '2px',
+      });
+    }
+
+    return style.isEmpty ? null : style;
+  }
+
+  Widget _buildBlockWidget(
+    _ReaderBlock block,
+    AppSettings settings,
+    Color textColor,
+  ) {
+    return HtmlWidget(
+      block.html,
+      textStyle: TextStyle(
+        fontFamily: _fontFamily,
+        fontSize: settings.fontSize,
+        height: settings.readerLineHeight,
+        color: textColor,
+      ),
+      customStylesBuilder: (element) {
+        void mergeStyle(
+          Map<String, String> target,
+          Map<String, String>? incoming,
+        ) {
+          if (incoming != null && incoming.isNotEmpty) {
+            target.addAll(incoming);
+          }
+        }
+
+        final tag = element.localName ?? '';
+        if (tag == 'img') {
+          final style = <String, String>{};
+          mergeStyle(style, _buildReaderPresetClassStyles(element));
+          style['border-radius'] = '4px';
+
+          final insideTable = _isInsideTableStructure(element);
+          final insideIllustration = _isInsideIllustrationContainer(element);
+          final parent = element.parent;
+          final parentTag = parent?.localName;
+          final inlineStyle = (element.attributes['style'] ?? '').toLowerCase();
+          final isFloating =
+              element.attributes['align']?.isNotEmpty == true ||
+              inlineStyle.contains('float') ||
+              element.classes.contains('fr') ||
+              element.classes.contains('fl') ||
+              (parent != null &&
+                  (parent.classes.contains('fr') ||
+                      parent.classes.contains('fl')));
+
+          if (isFloating) {
+            return style.isEmpty ? null : style;
+          }
+
+          if (insideIllustration) {
+            style.addAll({
+              'width': 'auto',
+              'height': 'auto',
+              'max-width': '100%',
+              'display': 'inline-block',
+              'margin': '0',
+              'padding': '0',
+            });
+            return style;
+          }
+
+          if (insideTable) {
+            style.addAll({
+              'width': 'auto',
+              'height': 'auto',
+              'display': 'inline-block',
+              'margin': '0',
+              'padding': '0',
+            });
+            return style;
+          }
+
+          style.addAll({
+            'width': 'auto',
+            'height': 'auto',
+            'max-width': '100%',
+            'margin':
+                parentTag == 'p' ||
+                        parentTag == 'div' ||
+                        parentTag == 'blockquote'
+                    ? '0 5px'
+                    : '0',
+            'padding': '0',
+            'display': 'inline-block',
+          });
+          return style;
+        }
+
+        final style = <String, String>{};
+        mergeStyle(
+          style,
+          _buildReaderBlockTagStyles(element, settings.readerLineHeight),
+        );
+        mergeStyle(style, _buildReaderPresetClassStyles(element));
+
+        if (tag == 'p') {
+          style.putIfAbsent('margin', () => '0 0 0.85em 0');
+          if (settings.readerFirstLineIndent) {
+            style.putIfAbsent('text-indent', () => '2em');
+          }
+        } else if (_blockTags.contains(tag)) {
+          style.putIfAbsent('margin', () => '0 0 0.85em 0');
+        }
+
+        return style.isEmpty ? null : style;
+      },
+      customWidgetBuilder:
+          (element) =>
+              _buildIllustrationContainerWidget(element, textColor) ??
+              _buildImageWidget(element, textColor),
+      onTapUrl: (_) => true,
+    );
+  }
+
+  void _onMeasuredBlock(int index, double height, String measureKey) {
+    final normalizedHeight = height.isFinite ? height : 0.0;
+    if (normalizedHeight <= 0) {
+      return;
+    }
+
+    if (_lastMeasureKey != measureKey) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _lastMeasureKey = measureKey;
+        _measuredBlockHeights = {index: normalizedHeight};
+      });
+      return;
+    }
+
+    final previous = _measuredBlockHeights[index];
+    if (previous != null && (previous - normalizedHeight).abs() < 0.5) {
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _measuredBlockHeights = {
+        ..._measuredBlockHeights,
+        index: normalizedHeight,
+      };
+    });
+  }
+
+  int _resolveBlockIndex(String xPath) {
+    if (_blocks.isEmpty) return 0;
+    var cleanXPath = XPathUtils.cleanXPath(xPath);
+    while (cleanXPath.isNotEmpty) {
+      final index = _indexByXPath[cleanXPath];
+      if (index != null) return index;
+      final slash = cleanXPath.lastIndexOf('/');
+      if (slash <= 0) break;
+      cleanXPath = cleanXPath.substring(0, slash);
+    }
+    return 0;
+  }
+
+  double _pageContentHeight(BoxConstraints constraints) {
+    return (constraints.maxHeight - 60).clamp(220.0, double.infinity);
+  }
+
+  List<_ReaderPageSlice> _buildPages(
+    BoxConstraints constraints,
+    AppSettings settings,
+  ) {
+    if (_blocks.isEmpty) return const [];
+    final budget = _pageContentHeight(constraints);
+    final pages = <_ReaderPageSlice>[];
+    var start = 0;
+    var cost = 0.0;
+    for (var i = 0; i < _blocks.length; i++) {
+      final blockCost = (_measuredBlockHeights[i] ?? budget) + 4;
+      if (i > start && cost + blockCost > budget) {
+        pages.add(_makePage(start, i));
+        start = i;
+        cost = blockCost;
+      } else {
+        cost += blockCost;
+      }
+    }
+    pages.add(_makePage(start, _blocks.length));
+    return pages;
+  }
+
+  _ReaderPageSlice _makePage(int start, int end) {
+    final html = _blocks
+        .sublist(start, end)
+        .map((block) => block.html)
+        .join('\n');
+    return _ReaderPageSlice(start, end, _blocks[start].xPath, html);
+  }
+
+  bool _isImageOnlyPage(_ReaderPageSlice page) {
+    if (page.end <= page.start) {
+      return false;
+    }
+
+    if (page.end - page.start != 1) {
+      return false;
+    }
+
+    return _isStandaloneImageBlock(_blocks[page.start]);
+  }
+
+  String? _extractPrimaryImageSrc(_ReaderPageSlice page) {
+    if (!_isImageOnlyPage(page)) {
+      return null;
+    }
+
+    final fragment = html_parser.parseFragment(page.html);
+    return fragment.querySelector('img')?.attributes['src'];
+  }
+
+  bool _isStandaloneImageBlock(_ReaderBlock block) {
+    if (block.imageCount != 1 || block.textLength != 0) {
+      return false;
+    }
+
+    try {
+      final fragment = html_parser.parseFragment(block.html);
+      final elements = fragment.nodes.whereType<dom.Element>().toList();
+      if (elements.length != 1) {
+        return false;
+      }
+
+      final root = elements.first;
+      final tag = root.localName ?? '';
+      if (_tableRelatedTags.contains(tag)) {
+        return false;
+      }
+      if (tag == 'img') {
+        return true;
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _scheduleRestore(
+    List<_ReaderPageSlice> pages,
+    BoxConstraints constraints,
+    AppSettings settings,
+  ) {
+    final layoutKey =
+        '${_chapter?.id}|${constraints.maxWidth.toStringAsFixed(1)}|${constraints.maxHeight.toStringAsFixed(1)}|'
+        '${settings.fontSize.toStringAsFixed(2)}|${settings.readerLineHeight.toStringAsFixed(2)}|'
+        '${settings.readerFirstLineIndent}|${pages.length}';
+    if (_lastLayoutKey == layoutKey) return;
+    _lastLayoutKey = layoutKey;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted || !_pageController.hasClients || pages.isEmpty) return;
+      var targetPage = _currentPage.clamp(0, pages.length - 1);
+      if (_pendingRestoreXPath != null && _pendingRestoreXPath!.isNotEmpty) {
+        final blockIndex = _resolveBlockIndex(_pendingRestoreXPath!);
+        targetPage = pages.indexWhere(
+          (page) => blockIndex >= page.start && blockIndex < page.end,
+        );
+        if (targetPage < 0) targetPage = 0;
+      }
+      _pageController.jumpToPage(targetPage);
+      final xPath = pages[targetPage].xPath;
+      if (!mounted) return;
+      setState(() {
+        _currentPage = targetPage;
+        _currentXPath = xPath;
+        _pendingRestoreXPath = null;
+      });
+      await _savePosition(xPath: xPath);
+    });
+  }
+
+  Color _readerBackgroundColor(AppSettings settings, BuildContext context) {
+    if (settings.readerUseThemeBackground) {
+      return Theme.of(context).colorScheme.surface;
+    }
+    if (settings.readerUseCustomColor) {
+      return Color(settings.readerBackgroundColor);
+    }
+    return kReaderPresets[settings.readerPresetIndex.clamp(
+          0,
+          kReaderPresets.length - 1,
+        )]
+        .backgroundColor;
+  }
+
+  Color _readerTextColor(AppSettings settings, BuildContext context) {
+    if (settings.readerUseThemeBackground) {
+      return Theme.of(context).colorScheme.onSurface;
+    }
+    if (settings.readerUseCustomColor) {
+      return Color(settings.readerTextColor);
+    }
+    return kReaderPresets[settings.readerPresetIndex.clamp(
+          0,
+          kReaderPresets.length - 1,
+        )]
+        .textColor;
+  }
+
+  Future<void> _openChapterList(BuildContext context) async {
+    await showReaderChapterListSheet(
+      context,
+      bookId: widget.bid,
+      currentSortNum: _chapter?.sortNum ?? _targetSortNum,
+      onSelected: (sortNum) {
+        if (sortNum == _targetSortNum) {
+          return;
+        }
+        _loadChapter(sortNum);
+      },
+    );
+  }
+  /*
+    var chapters = BookDetailPageState.cachedChapterList;
+    if (chapters == null || chapters.isEmpty) {
+      final bookInfo = await _bookService.getBookInfo(widget.bid);
+      chapters = bookInfo.chapters;
+      BookDetailPageState.cachedChapterList = chapters;
+    }
+    final loadedChapters = chapters;
+    if (!context.mounted || loadedChapters.isEmpty) {
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (context) {
+        return ListView.builder(
+          itemCount: loadedChapters.length,
+          itemBuilder: (context, index) {
+            final sortNum = index + 1;
+            return ListTile(
+              selected: sortNum == _targetSortNum,
+              title: Text(loadedChapters[index].title),
+              subtitle: Text('第 $sortNum 章'),
+              onTap: () {
+                Navigator.of(context).pop();
+                if (sortNum == _targetSortNum) {
+                  return;
+                }
+                _loadChapter(sortNum);
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+*/
+
+  Widget _buildImageOnlyPage({
+    required _ReaderPageSlice page,
+    required String imageUrl,
+    required double width,
+    required double maxHeight,
+    required AppSettings settings,
+    required Color textColor,
+  }) {
+    final block = _blocks[page.start];
+
+    return SizedBox.expand(
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: width, maxHeight: maxHeight),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.center,
+            child: SizedBox(
+              key: ValueKey('image_only_$imageUrl'),
+              width: width,
+              child: _buildBlockWidget(block, settings, textColor),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHtmlPage({
+    required _ReaderPageSlice page,
+    required double width,
+    required double maxHeight,
+    required AppSettings settings,
+    required Color textColor,
+  }) {
+    final blockWidgets = <Widget>[
+      for (int i = page.start; i < page.end; i++)
+        _buildBlockWidget(_blocks[i], settings, textColor),
+    ];
+    final measuredHeight = List<double>.generate(
+      page.end - page.start,
+      (offset) => _measuredBlockHeights[page.start + offset] ?? 0,
+    ).fold<double>(0, (sum, value) => sum + value);
+    final requiresScaleDown =
+        page.end - page.start == 1 &&
+        measuredHeight > 0 &&
+        measuredHeight > maxHeight;
+
+    Widget content = SizedBox(
+      width: width,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: blockWidgets,
+      ),
+    );
+
+    if (requiresScaleDown) {
+      content = FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.topCenter,
+        child: content,
+      );
+    }
+
+    return SizedBox.expand(child: content);
+  }
+
+  Widget _buildMeasurementLayer({
+    required String measureKey,
+    required double width,
+    required AppSettings settings,
+    required Color textColor,
+  }) {
+    return Offstage(
+      offstage: true,
+      child: SingleChildScrollView(
+        child: SizedBox(
+          width: width,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (int i = 0; i < _blocks.length; i++)
+                _MeasureSize(
+                  onChange:
+                      (size) => _onMeasuredBlock(i, size.height, measureKey),
+                  child: _buildBlockWidget(_blocks[i], settings, textColor),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _displayTitle(AppSettings settings) {
+    return buildReaderDisplayTitle(
+      loading: _loading,
+      cleanChapterTitle: settings.cleanChapterTitle,
+      chapterTitle: _chapter?.title,
+      bookTitle: widget.bookTitle,
+    );
+  }
+
+  String? _fullTitle() {
+    final chapterTitle = _chapter?.title.trim();
+    if (chapterTitle != null && chapterTitle.isNotEmpty) {
+      return chapterTitle;
+    }
+
+    final bookTitle = widget.bookTitle?.trim();
+    if (bookTitle != null && bookTitle.isNotEmpty) {
+      return bookTitle;
+    }
+
+    return null;
+  }
+
+  void _showFullTitleSnackBar(BuildContext context) {
+    final fullTitle = _fullTitle();
+    if (fullTitle == null || fullTitle.isEmpty) {
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) {
+      return;
+    }
+
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(fullTitle, style: const TextStyle(fontSize: 14)),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+  }
+
+  AdaptiveAppBar _buildAdaptiveAppBar(
+    BuildContext context,
+    AppSettings settings,
+  ) {
+    return AdaptiveAppBar(
+      title: _displayTitle(settings),
+      onTitleTap: () => _showFullTitleSnackBar(context),
+      useNativeToolbar: true,
+      leading: IconButton(
+        onPressed: () async {
+          final navigator = Navigator.of(context);
+          await _savePosition(immediate: true);
+          if (mounted) {
+            navigator.pop();
+          }
+        },
+        icon: Icon(
+          PlatformInfo.isIOS ? CupertinoIcons.chevron_back : Icons.arrow_back,
+        ),
+      ),
+      actions: [
+        AdaptiveAppBarAction(
+          iosSymbol: 'list.bullet',
+          icon: PlatformInfo.isIOS ? CupertinoIcons.list_bullet : Icons.list,
+          onPressed: () => _openChapterList(context),
+        ),
+        AdaptiveAppBarAction(
+          iosSymbol: 'paintbrush',
+          icon:
+              PlatformInfo.isIOS
+                  ? CupertinoIcons.paintbrush
+                  : Icons.palette_outlined,
+          onPressed: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => const ReaderBackgroundPage(),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = ref.watch(settingsProvider);
+    final backgroundColor = _readerBackgroundColor(settings, context);
+    final textColor = _readerTextColor(settings, context);
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) {
+          return;
+        }
+        final navigator = Navigator.of(context);
+        await _savePosition(immediate: true);
+        if (mounted) {
+          navigator.pop(result);
+        }
+      },
+      child: AdaptiveScaffold(
+        appBar: _buildAdaptiveAppBar(context, settings),
+        body: Container(
+          color: backgroundColor,
+          child:
+              _loading
+                  ? const Center(child: M3ELoadingIndicator())
+                  : _error != null
+                  ? Center(child: Text(_error!, textAlign: TextAlign.center))
+                  : LayoutBuilder(
+                    builder: (context, constraints) {
+                      final horizontalPadding =
+                          constraints.maxWidth >= 720 ? 48.0 : 24.0;
+                      final contentWidth =
+                          constraints.maxWidth - horizontalPadding * 2;
+                      final contentHeight = _pageContentHeight(constraints);
+                      final measureKey =
+                          '${_chapter?.id}|${contentWidth.toStringAsFixed(1)}|'
+                          '${settings.fontSize.toStringAsFixed(2)}|'
+                          '${settings.readerLineHeight.toStringAsFixed(2)}|'
+                          '${settings.readerFirstLineIndent}|${_fontFamily ?? ''}';
+                      final measurementReady =
+                          _lastMeasureKey == measureKey &&
+                          _measuredBlockHeights.length == _blocks.length;
+                      final pages =
+                          measurementReady
+                              ? _buildPages(constraints, settings)
+                              : const <_ReaderPageSlice>[];
+                      if (measurementReady && pages.isNotEmpty) {
+                        _scheduleRestore(pages, constraints, settings);
+                      }
+                      return Stack(
+                        children: [
+                          _buildMeasurementLayer(
+                            measureKey: measureKey,
+                            width: contentWidth,
+                            settings: settings,
+                            textColor: textColor,
+                          ),
+                          if (!measurementReady || pages.isEmpty)
+                            const Center(child: M3ELoadingIndicator())
+                          else
+                            PageView.builder(
+                              controller: _pageController,
+                              itemCount: pages.length,
+                              onPageChanged: (index) {
+                                final xPath = pages[index].xPath;
+                                setState(() {
+                                  _currentPage = index;
+                                  _currentXPath = xPath;
+                                });
+                                unawaited(_savePosition(xPath: xPath));
+                              },
+                              itemBuilder: (context, index) {
+                                final page = pages[index];
+                                final imageOnly = _isImageOnlyPage(page);
+                                final imageUrl = _extractPrimaryImageSrc(page);
+                                return GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTapUp: (details) {
+                                    final dx = details.localPosition.dx;
+                                    if (dx <= constraints.maxWidth * 0.35) {
+                                      if (_currentPage > 0) {
+                                        _pageController.previousPage(
+                                          duration: const Duration(
+                                            milliseconds: 220,
+                                          ),
+                                          curve: Curves.easeOutCubic,
+                                        );
+                                      } else if (_targetSortNum > 1) {
+                                        _loadChapter(_targetSortNum - 1);
+                                      }
+                                    } else if (dx >=
+                                        constraints.maxWidth * 0.65) {
+                                      if (_currentPage < pages.length - 1) {
+                                        _pageController.nextPage(
+                                          duration: const Duration(
+                                            milliseconds: 220,
+                                          ),
+                                          curve: Curves.easeOutCubic,
+                                        );
+                                      } else if (_targetSortNum <
+                                          widget.totalChapters) {
+                                        _loadChapter(_targetSortNum + 1);
+                                      }
+                                    }
+                                  },
+                                  child: Padding(
+                                    padding: EdgeInsets.fromLTRB(
+                                      horizontalPadding,
+                                      24,
+                                      horizontalPadding,
+                                      36,
+                                    ),
+                                    child:
+                                        imageOnly && imageUrl != null
+                                            ? _buildImageOnlyPage(
+                                              page: page,
+                                              imageUrl: imageUrl,
+                                              width: contentWidth,
+                                              maxHeight: contentHeight,
+                                              settings: settings,
+                                              textColor: textColor,
+                                            )
+                                            : _buildHtmlPage(
+                                              page: page,
+                                              width: contentWidth,
+                                              maxHeight: contentHeight,
+                                              settings: settings,
+                                              textColor: textColor,
+                                            ),
+                                  ),
+                                );
+                              },
+                            ),
+                          if (measurementReady && pages.isNotEmpty)
+                            Positioned(
+                              left: 16,
+                              right: 16,
+                              bottom: 12,
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '第 $_targetSortNum / ${widget.totalChapters} 章',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.bodySmall?.copyWith(
+                                        color: textColor.withValues(
+                                          alpha: 0.65,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: textColor.withValues(alpha: 0.08),
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Text(
+                                      '${_currentPage + 1} / ${pages.length}',
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.bodySmall?.copyWith(
+                                        color: textColor.withValues(
+                                          alpha: 0.85,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MeasureSize extends SingleChildRenderObjectWidget {
+  final ValueChanged<Size> onChange;
+
+  const _MeasureSize({required this.onChange, required super.child});
+
+  @override
+  RenderObject createRenderObject(BuildContext context) {
+    return _RenderMeasureSize(onChange);
+  }
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderMeasureSize renderObject,
+  ) {
+    renderObject.onChange = onChange;
+  }
+}
+
+class _RenderMeasureSize extends RenderProxyBox {
+  _RenderMeasureSize(this.onChange);
+
+  ValueChanged<Size> onChange;
+  Size? _oldSize;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    final newSize = child?.size;
+    if (newSize == null || _oldSize == newSize) {
+      return;
+    }
+    _oldSize = newSize;
+    WidgetsBinding.instance.addPostFrameCallback((_) => onChange(newSize));
+  }
+}
