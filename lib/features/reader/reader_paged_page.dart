@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
+import 'package:novella/core/utils/cover_url_utils.dart';
 import 'package:novella/core/utils/font_manager.dart';
 import 'package:novella/core/utils/xpath_utils.dart';
 import 'package:novella/core/widgets/m3e_loading_indicator.dart';
@@ -108,11 +109,13 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage> {
   final _progressService = ReadingProgressService();
   final _readingTimeService = ReadingTimeService();
   final _pageController = PageController();
+  static final Map<String, ColorScheme> _schemeCache = {};
   ChapterContent? _chapter;
   List<_ReaderBlock> _blocks = const [];
   Map<String, int> _indexByXPath = const {};
   String? _fontFamily;
   String? _error;
+  ColorScheme? _dynamicColorScheme;
   String? _pendingRestoreXPath;
   String _currentXPath = '//*';
   String _lastLayoutKey = '';
@@ -129,6 +132,14 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage> {
     _targetSortNum = widget.sortNum;
     _loadChapter(widget.sortNum);
     _readingTimeService.startSession();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_dynamicColorScheme == null) {
+      _extractColors();
+    }
   }
 
   @override
@@ -919,6 +930,7 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage> {
     _ReaderBlock block,
     AppSettings settings,
     Color textColor,
+    Color linkColor,
   ) {
     return HtmlWidget(
       block.html,
@@ -1007,6 +1019,11 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage> {
           _buildReaderBlockTagStyles(element, settings.readerLineHeight),
         );
         mergeStyle(style, _buildReaderPresetClassStyles(element));
+
+        if (tag == 'a') {
+          style['color'] =
+              '#${linkColor.toARGB32().toRadixString(16).padLeft(8, '0').substring(2)}';
+        }
 
         if (tag == 'p') {
           style.putIfAbsent('margin', () => '0 0 0.85em 0');
@@ -1204,9 +1221,47 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage> {
     });
   }
 
+  void _extractColors() {
+    if (widget.coverUrl == null || widget.coverUrl!.isEmpty) {
+      return;
+    }
+
+    final settings = ref.read(settingsProvider);
+    if (!settings.coverColorExtraction) {
+      return;
+    }
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cacheKey = '${widget.bid}_${isDark ? 'dark' : 'light'}';
+
+    if (_schemeCache.containsKey(cacheKey)) {
+      if (mounted) {
+        setState(() {
+          _dynamicColorScheme = _schemeCache[cacheKey]!;
+        });
+      }
+      return;
+    }
+
+    final seedColor = CoverUrlUtils.extractSeedColor(widget.coverUrl);
+    if (seedColor != null && mounted) {
+      final scheme = ColorScheme.fromSeed(
+        seedColor: seedColor,
+        brightness: isDark ? Brightness.dark : Brightness.light,
+      );
+      _schemeCache[cacheKey] = scheme;
+      setState(() {
+        _dynamicColorScheme = scheme;
+      });
+    }
+  }
+
   Color _readerBackgroundColor(AppSettings settings, BuildContext context) {
+    final themeScheme =
+        (settings.coverColorExtraction ? _dynamicColorScheme : null) ??
+        Theme.of(context).colorScheme;
     if (settings.readerUseThemeBackground) {
-      return Theme.of(context).colorScheme.surface;
+      return themeScheme.surface;
     }
     if (settings.readerUseCustomColor) {
       return Color(settings.readerBackgroundColor);
@@ -1219,8 +1274,11 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage> {
   }
 
   Color _readerTextColor(AppSettings settings, BuildContext context) {
+    final themeScheme =
+        (settings.coverColorExtraction ? _dynamicColorScheme : null) ??
+        Theme.of(context).colorScheme;
     if (settings.readerUseThemeBackground) {
-      return Theme.of(context).colorScheme.onSurface;
+      return themeScheme.onSurface;
     }
     if (settings.readerUseCustomColor) {
       return Color(settings.readerTextColor);
@@ -1291,6 +1349,7 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage> {
     required double maxHeight,
     required AppSettings settings,
     required Color textColor,
+    required Color linkColor,
   }) {
     final block = _blocks[page.start];
 
@@ -1304,7 +1363,7 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage> {
             child: SizedBox(
               key: ValueKey('image_only_$imageUrl'),
               width: width,
-              child: _buildBlockWidget(block, settings, textColor),
+              child: _buildBlockWidget(block, settings, textColor, linkColor),
             ),
           ),
         ),
@@ -1318,10 +1377,11 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage> {
     required double maxHeight,
     required AppSettings settings,
     required Color textColor,
+    required Color linkColor,
   }) {
     final blockWidgets = <Widget>[
       for (int i = page.start; i < page.end; i++)
-        _buildBlockWidget(_blocks[i], settings, textColor),
+        _buildBlockWidget(_blocks[i], settings, textColor, linkColor),
     ];
     final measuredHeight = List<double>.generate(
       page.end - page.start,
@@ -1357,6 +1417,7 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage> {
     required double width,
     required AppSettings settings,
     required Color textColor,
+    required Color linkColor,
   }) {
     return Offstage(
       offstage: true,
@@ -1370,7 +1431,12 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage> {
                 _MeasureSize(
                   onChange:
                       (size) => _onMeasuredBlock(i, size.height, measureKey),
-                  child: _buildBlockWidget(_blocks[i], settings, textColor),
+                  child: _buildBlockWidget(
+                    _blocks[i],
+                    settings,
+                    textColor,
+                    linkColor,
+                  ),
                 ),
             ],
           ),
@@ -1496,6 +1562,7 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage> {
     if (PlatformInfo.isIOS || PlatformInfo.isMacOS) {
       return AdaptivePopupMenuButton.icon<String>(
         icon: settings.useIOS26Style ? 'ellipsis' : CupertinoIcons.ellipsis,
+        tint: Theme.of(context).colorScheme.primary,
         buttonStyle: PopupButtonStyle.glass,
         items: [
           AdaptivePopupMenuItem<String>(
@@ -1628,8 +1695,34 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage> {
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
-    final backgroundColor = _readerBackgroundColor(settings, context);
-    final textColor = _readerTextColor(settings, context);
+    final baseTheme = Theme.of(context);
+    final currentScheme =
+        (settings.coverColorExtraction ? _dynamicColorScheme : null) ??
+        baseTheme.colorScheme;
+    if (settings.coverColorExtraction &&
+        _dynamicColorScheme == null &&
+        widget.coverUrl != null &&
+        widget.coverUrl!.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _dynamicColorScheme == null) {
+          _extractColors();
+        }
+      });
+    }
+    final currentTheme = baseTheme.copyWith(
+      colorScheme: currentScheme,
+      scaffoldBackgroundColor: currentScheme.surface,
+      canvasColor: currentScheme.surface,
+      bottomSheetTheme: baseTheme.bottomSheetTheme.copyWith(
+        backgroundColor: currentScheme.surface,
+        modalBackgroundColor: currentScheme.surface,
+        surfaceTintColor: Colors.transparent,
+      ),
+      popupMenuTheme: baseTheme.popupMenuTheme.copyWith(
+        color: currentScheme.surface,
+        surfaceTintColor: Colors.transparent,
+      ),
+    );
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
@@ -1642,178 +1735,216 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage> {
           navigator.pop(result);
         }
       },
-      child: AdaptiveScaffold(
-        body: Container(
-          color: backgroundColor,
-          child: Stack(
-            children: [
-              _loading
-                  ? const Center(child: M3ELoadingIndicator())
-                  : _error != null
-                  ? Center(child: Text(_error!, textAlign: TextAlign.center))
-                  : LayoutBuilder(
-                    builder: (context, constraints) {
-                      final horizontalPadding =
-                          constraints.maxWidth >= 720 ? 48.0 : 24.0;
-                      final contentWidth =
-                          constraints.maxWidth - horizontalPadding * 2;
-                      final contentTopPadding = _topContentPadding(context);
-                      final contentBottomPadding = _bottomContentPadding(
-                        context,
-                      );
-                      final contentHeight = _pageContentHeight(
-                        context,
-                        constraints,
-                      );
-                      final measureKey =
-                          '${_chapter?.id}|${contentWidth.toStringAsFixed(1)}|'
-                          '${settings.fontSize.toStringAsFixed(2)}|'
-                          '${settings.readerLineHeight.toStringAsFixed(2)}|'
-                          '${settings.readerFirstLineIndent}|${_fontFamily ?? ''}';
-                      final measurementReady =
-                          _lastMeasureKey == measureKey &&
-                          _measuredBlockHeights.length == _blocks.length;
-                      final pages =
-                          measurementReady
-                              ? _buildPages(context, constraints, settings)
-                              : const <_ReaderPageSlice>[];
-                      if (measurementReady && pages.isNotEmpty) {
-                        _scheduleRestore(pages, constraints, settings);
-                      }
-                      return Stack(
-                        children: [
-                          _buildMeasurementLayer(
-                            measureKey: measureKey,
-                            width: contentWidth,
-                            settings: settings,
-                            textColor: textColor,
-                          ),
-                          if (!measurementReady || pages.isEmpty)
-                            const Center(child: M3ELoadingIndicator())
-                          else
-                            PageView.builder(
-                              controller: _pageController,
-                              itemCount: pages.length,
-                              onPageChanged: (index) {
-                                final xPath = pages[index].xPath;
-                                setState(() {
-                                  _currentPage = index;
-                                  _currentXPath = xPath;
-                                });
-                                unawaited(_savePosition(xPath: xPath));
-                              },
-                              itemBuilder: (context, index) {
-                                final page = pages[index];
-                                final imageOnly = _isImageOnlyPage(page);
-                                final imageUrl = _extractPrimaryImageSrc(page);
-                                return GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTapUp: (details) {
-                                    final dx = details.localPosition.dx;
-                                    if (dx <= constraints.maxWidth * 0.35) {
-                                      if (_currentPage > 0) {
-                                        _pageController.previousPage(
-                                          duration: const Duration(
-                                            milliseconds: 220,
-                                          ),
-                                          curve: Curves.easeOutCubic,
-                                        );
-                                      } else if (_targetSortNum > 1) {
-                                        _loadChapter(_targetSortNum - 1);
-                                      }
-                                    } else if (dx >=
-                                        constraints.maxWidth * 0.65) {
-                                      if (_currentPage < pages.length - 1) {
-                                        _pageController.nextPage(
-                                          duration: const Duration(
-                                            milliseconds: 220,
-                                          ),
-                                          curve: Curves.easeOutCubic,
-                                        );
-                                      } else if (_targetSortNum <
-                                          widget.totalChapters) {
-                                        _loadChapter(_targetSortNum + 1);
-                                      }
-                                    }
-                                  },
-                                  child: Padding(
-                                    padding: EdgeInsets.fromLTRB(
-                                      horizontalPadding,
-                                      contentTopPadding,
-                                      horizontalPadding,
-                                      contentBottomPadding,
-                                    ),
-                                    child:
-                                        imageOnly && imageUrl != null
-                                            ? _buildImageOnlyPage(
-                                              page: page,
-                                              imageUrl: imageUrl,
-                                              width: contentWidth,
-                                              maxHeight: contentHeight,
-                                              settings: settings,
-                                              textColor: textColor,
-                                            )
-                                            : _buildHtmlPage(
-                                              page: page,
-                                              width: contentWidth,
-                                              maxHeight: contentHeight,
-                                              settings: settings,
-                                              textColor: textColor,
-                                            ),
-                                  ),
-                                );
-                              },
-                            ),
-                          if (measurementReady && pages.isNotEmpty)
-                            Positioned(
-                              left: 16,
-                              right: 16,
-                              bottom:
-                                  MediaQuery.paddingOf(context).bottom +
-                                  _indicatorBottomGap,
-                              child: Row(
+      child: AnimatedTheme(
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeOutCubic,
+        data: currentTheme,
+        child: CupertinoTheme(
+          data: MaterialBasedCupertinoThemeData(materialTheme: currentTheme),
+          child: Builder(
+            builder: (context) {
+              final backgroundColor = _readerBackgroundColor(settings, context);
+              final textColor = _readerTextColor(settings, context);
+              final linkColor = Theme.of(context).colorScheme.primary;
+              return AdaptiveScaffold(
+                body: Container(
+                  color: backgroundColor,
+                  child: Stack(
+                    children: [
+                      _loading
+                          ? const Center(child: M3ELoadingIndicator())
+                          : _error != null
+                          ? Center(
+                            child: Text(_error!, textAlign: TextAlign.center),
+                          )
+                          : LayoutBuilder(
+                            builder: (context, constraints) {
+                              final horizontalPadding =
+                                  constraints.maxWidth >= 720 ? 48.0 : 24.0;
+                              final contentWidth =
+                                  constraints.maxWidth - horizontalPadding * 2;
+                              final contentTopPadding = _topContentPadding(
+                                context,
+                              );
+                              final contentBottomPadding =
+                                  _bottomContentPadding(context);
+                              final contentHeight = _pageContentHeight(
+                                context,
+                                constraints,
+                              );
+                              final measureKey =
+                                  '${_chapter?.id}|${contentWidth.toStringAsFixed(1)}|'
+                                  '${settings.fontSize.toStringAsFixed(2)}|'
+                                  '${settings.readerLineHeight.toStringAsFixed(2)}|'
+                                  '${settings.readerFirstLineIndent}|${_fontFamily ?? ''}';
+                              final measurementReady =
+                                  _lastMeasureKey == measureKey &&
+                                  _measuredBlockHeights.length ==
+                                      _blocks.length;
+                              final pages =
+                                  measurementReady
+                                      ? _buildPages(
+                                        context,
+                                        constraints,
+                                        settings,
+                                      )
+                                      : const <_ReaderPageSlice>[];
+                              if (measurementReady && pages.isNotEmpty) {
+                                _scheduleRestore(pages, constraints, settings);
+                              }
+                              return Stack(
                                 children: [
-                                  Expanded(
-                                    child: Text(
-                                      '第 $_targetSortNum / ${widget.totalChapters} 章',
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodySmall?.copyWith(
-                                        color: textColor.withValues(
-                                          alpha: 0.65,
-                                        ),
+                                  _buildMeasurementLayer(
+                                    measureKey: measureKey,
+                                    width: contentWidth,
+                                    settings: settings,
+                                    textColor: textColor,
+                                    linkColor: linkColor,
+                                  ),
+                                  if (!measurementReady || pages.isEmpty)
+                                    const Center(child: M3ELoadingIndicator())
+                                  else
+                                    PageView.builder(
+                                      controller: _pageController,
+                                      itemCount: pages.length,
+                                      onPageChanged: (index) {
+                                        final xPath = pages[index].xPath;
+                                        setState(() {
+                                          _currentPage = index;
+                                          _currentXPath = xPath;
+                                        });
+                                        unawaited(_savePosition(xPath: xPath));
+                                      },
+                                      itemBuilder: (context, index) {
+                                        final page = pages[index];
+                                        final imageOnly = _isImageOnlyPage(
+                                          page,
+                                        );
+                                        final imageUrl =
+                                            _extractPrimaryImageSrc(page);
+                                        return GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTapUp: (details) {
+                                            final dx = details.localPosition.dx;
+                                            if (dx <=
+                                                constraints.maxWidth * 0.35) {
+                                              if (_currentPage > 0) {
+                                                _pageController.previousPage(
+                                                  duration: const Duration(
+                                                    milliseconds: 220,
+                                                  ),
+                                                  curve: Curves.easeOutCubic,
+                                                );
+                                              } else if (_targetSortNum > 1) {
+                                                _loadChapter(
+                                                  _targetSortNum - 1,
+                                                );
+                                              }
+                                            } else if (dx >=
+                                                constraints.maxWidth * 0.65) {
+                                              if (_currentPage <
+                                                  pages.length - 1) {
+                                                _pageController.nextPage(
+                                                  duration: const Duration(
+                                                    milliseconds: 220,
+                                                  ),
+                                                  curve: Curves.easeOutCubic,
+                                                );
+                                              } else if (_targetSortNum <
+                                                  widget.totalChapters) {
+                                                _loadChapter(
+                                                  _targetSortNum + 1,
+                                                );
+                                              }
+                                            }
+                                          },
+                                          child: Padding(
+                                            padding: EdgeInsets.fromLTRB(
+                                              horizontalPadding,
+                                              contentTopPadding,
+                                              horizontalPadding,
+                                              contentBottomPadding,
+                                            ),
+                                            child:
+                                                imageOnly && imageUrl != null
+                                                    ? _buildImageOnlyPage(
+                                                      page: page,
+                                                      imageUrl: imageUrl,
+                                                      width: contentWidth,
+                                                      maxHeight: contentHeight,
+                                                      settings: settings,
+                                                      textColor: textColor,
+                                                      linkColor: linkColor,
+                                                    )
+                                                    : _buildHtmlPage(
+                                                      page: page,
+                                                      width: contentWidth,
+                                                      maxHeight: contentHeight,
+                                                      settings: settings,
+                                                      textColor: textColor,
+                                                      linkColor: linkColor,
+                                                    ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  if (measurementReady && pages.isNotEmpty)
+                                    Positioned(
+                                      left: 16,
+                                      right: 16,
+                                      bottom:
+                                          MediaQuery.paddingOf(context).bottom +
+                                          _indicatorBottomGap,
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              '第 $_targetSortNum / ${widget.totalChapters} 章',
+                                              style: Theme.of(
+                                                context,
+                                              ).textTheme.bodySmall?.copyWith(
+                                                color: textColor.withValues(
+                                                  alpha: 0.65,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 6,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: textColor.withValues(
+                                                alpha: 0.08,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                            ),
+                                            child: Text(
+                                              '${_currentPage + 1} / ${pages.length}',
+                                              style: Theme.of(
+                                                context,
+                                              ).textTheme.bodySmall?.copyWith(
+                                                color: textColor.withValues(
+                                                  alpha: 0.85,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 6,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: textColor.withValues(alpha: 0.08),
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
-                                    child: Text(
-                                      '${_currentPage + 1} / ${pages.length}',
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodySmall?.copyWith(
-                                        color: textColor.withValues(
-                                          alpha: 0.85,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
                                 ],
-                              ),
-                            ),
-                        ],
-                      );
-                    },
+                              );
+                            },
+                          ),
+                      _buildTopOverlay(context, settings, textColor),
+                    ],
                   ),
-              _buildTopOverlay(context, settings, textColor),
-            ],
+                ),
+              );
+            },
           ),
         ),
       ),

@@ -981,67 +981,82 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
 
   /// 显示同步未完成警告弹窗
   void _showSyncWarningSheet() {
-    final colorScheme = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
+    final sheetTheme = _effectiveDynamicThemeData();
 
     showModalBottomSheet(
       context: context,
       useSafeArea: true,
       showDragHandle: true,
+      backgroundColor: sheetTheme.colorScheme.surface,
       builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                child: Row(
+        return Theme(
+          data: sheetTheme,
+          child: Builder(
+            builder: (context) {
+              final colorScheme = Theme.of(context).colorScheme;
+              final textTheme = Theme.of(context).textTheme;
+              return SafeArea(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.sync, color: colorScheme.tertiary),
-                    const SizedBox(width: 12),
-                    Text(
-                      '同步进行中',
-                      style: textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.sync, color: colorScheme.tertiary),
+                          const SizedBox(width: 12),
+                          Text(
+                            '同步进行中',
+                            style: textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      child: Text(
+                        '云端进度正在同步，现在进入阅读可能无法恢复到最新位置。',
+                        style: textTheme.bodyMedium?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    ListTile(
+                      leading: Icon(
+                        Icons.play_arrow,
+                        color: colorScheme.primary,
+                      ),
+                      title: const Text('继续阅读'),
+                      subtitle: const Text('忽略同步状态，立即进入'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        final sortNum = _readPosition?.sortNum ?? 1;
+                        _startReading(
+                          sortNum: sortNum,
+                          allowServerOverrideOnOpen: true,
+                        );
+                      },
+                    ),
+                    ListTile(
+                      leading: Icon(
+                        Icons.hourglass_top,
+                        color: colorScheme.tertiary,
+                      ),
+                      title: const Text('等待同步'),
+                      subtitle: const Text('稍后再试'),
+                      onTap: () => Navigator.pop(context),
+                    ),
+                    const SizedBox(height: 16),
                   ],
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: Text(
-                  '云端进度正在同步，现在进入阅读可能无法恢复到最新位置。',
-                  style: textTheme.bodyMedium?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-              ListTile(
-                leading: Icon(Icons.play_arrow, color: colorScheme.primary),
-                title: const Text('继续阅读'),
-                subtitle: const Text('忽略同步状态，立即进入'),
-                onTap: () {
-                  Navigator.pop(context);
-                  final sortNum = _readPosition?.sortNum ?? 1;
-                  _startReading(
-                    sortNum: sortNum,
-                    allowServerOverrideOnOpen: true,
-                  );
-                },
-              ),
-              ListTile(
-                leading: Icon(Icons.hourglass_top, color: colorScheme.tertiary),
-                title: const Text('等待同步'),
-                subtitle: const Text('稍后再试'),
-                onTap: () => Navigator.pop(context),
-              ),
-              const SizedBox(height: 16),
-            ],
+              );
+            },
           ),
         );
       },
@@ -1111,74 +1126,81 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
       return;
     }
 
-    final colorScheme = Theme.of(context).colorScheme;
+    final sheetTheme = _effectiveDynamicThemeData();
 
     showModalBottomSheet(
       context: context,
       useSafeArea: true,
       showDragHandle: true,
+      backgroundColor: sheetTheme.colorScheme.surface,
       builder:
-          (context) => SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Title
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
+          (context) => Theme(
+            data: sheetTheme,
+            child: Builder(
+              builder: (context) {
+                final colorScheme = Theme.of(context).colorScheme;
+                return SafeArea(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Title
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        child: Text(
+                          '标记此书籍',
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      // Subtitle
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                        child: Text(
+                          '选择当前状态',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: colorScheme.onSurfaceVariant),
+                        ),
+                      ),
+                      // Options
+                      _buildMarkOption(
+                        context,
+                        BookMarkStatus.toRead,
+                        Icons.schedule,
+                        '待读',
+                        colorScheme,
+                      ),
+                      _buildMarkOption(
+                        context,
+                        BookMarkStatus.reading,
+                        Icons.auto_stories,
+                        '在读',
+                        colorScheme,
+                      ),
+                      _buildMarkOption(
+                        context,
+                        BookMarkStatus.finished,
+                        Icons.check_circle_outline,
+                        '已读',
+                        colorScheme,
+                      ),
+                      // Clear mark option if already marked
+                      if (_currentMark != BookMarkStatus.none)
+                        _buildMarkOption(
+                          context,
+                          BookMarkStatus.none,
+                          Icons.clear,
+                          '清除标记',
+                          colorScheme,
+                        ),
+                      const SizedBox(height: 16),
+                    ],
                   ),
-                  child: Text(
-                    '标记此书籍',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                // Subtitle
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Text(
-                    '选择当前状态',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-                // Options
-                _buildMarkOption(
-                  context,
-                  BookMarkStatus.toRead,
-                  Icons.schedule,
-                  '待读',
-                  colorScheme,
-                ),
-                _buildMarkOption(
-                  context,
-                  BookMarkStatus.reading,
-                  Icons.auto_stories,
-                  '在读',
-                  colorScheme,
-                ),
-                _buildMarkOption(
-                  context,
-                  BookMarkStatus.finished,
-                  Icons.check_circle_outline,
-                  '已读',
-                  colorScheme,
-                ),
-                // Clear mark option if already marked
-                if (_currentMark != BookMarkStatus.none)
-                  _buildMarkOption(
-                    context,
-                    BookMarkStatus.none,
-                    Icons.clear,
-                    '清除标记',
-                    colorScheme,
-                  ),
-                const SizedBox(height: 16),
-              ],
+                );
+              },
             ),
           ),
     );
@@ -1326,6 +1348,35 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
     );
   }
 
+  ThemeData _effectiveDynamicThemeData() {
+    final settings = ref.read(settingsProvider);
+    final baseTheme = Theme.of(context);
+    final isOled =
+        settings.oledBlack && baseTheme.brightness == Brightness.dark;
+    final colorScheme =
+        (isOled ||
+                _dynamicColorScheme == null ||
+                !settings.coverColorExtraction)
+            ? baseTheme.colorScheme
+            : _dynamicColorScheme!;
+
+    return baseTheme.copyWith(
+      colorScheme: colorScheme,
+      scaffoldBackgroundColor: colorScheme.surface,
+      canvasColor: colorScheme.surface,
+      bottomSheetTheme: baseTheme.bottomSheetTheme.copyWith(
+        backgroundColor: colorScheme.surface,
+        modalBackgroundColor: colorScheme.surface,
+        surfaceTintColor: Colors.transparent,
+      ),
+      appBarTheme: baseTheme.appBarTheme.copyWith(
+        backgroundColor: colorScheme.surface,
+        foregroundColor: colorScheme.onSurface,
+        surfaceTintColor: Colors.transparent,
+      ),
+    );
+  }
+
   Widget _buildCoverHero(String coverUrl, ColorScheme colorScheme) {
     return Hero(
       key: _coverHeroKey,
@@ -1350,7 +1401,10 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
                   ? BookCoverPreviewer(
                     borderRadius: 8.0,
                     coverUrl: coverUrl,
-                    child: BookCoverImage(imageUrl: coverUrl, fit: BoxFit.cover),
+                    child: BookCoverImage(
+                      imageUrl: coverUrl,
+                      fit: BoxFit.cover,
+                    ),
                   )
                   : Container(
                     color: colorScheme.surfaceContainerHighest,
@@ -1739,6 +1793,7 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
                           type: CommentType.booked,
                           id: widget.bookId,
                           title: book.title,
+                          coverUrl: book.cover,
                         ),
                   ),
                 );
@@ -2120,52 +2175,63 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
   }
 
   void _showFullIntro(BuildContext context, String intro) {
+    final sheetTheme = _effectiveDynamicThemeData();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       useSafeArea: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
+      backgroundColor: sheetTheme.colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder:
-          (context) => DraggableScrollableSheet(
-            initialChildSize: 0.6,
-            minChildSize: 0.4,
-            maxChildSize: 0.9,
-            expand: false,
-            builder:
-                (context, scrollController) => Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 16),
-                      child: Text(
-                        '简介',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: ListView(
-                        controller: scrollController,
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                        children: [
-                          _buildIntroHtml(
-                            intro,
-                            baseStyle: TextStyle(
-                              fontSize: 16,
-                              height: 1.8,
-                              color: Theme.of(context).colorScheme.onSurface,
+          (context) => Theme(
+            data: sheetTheme,
+            child: Builder(
+              builder:
+                  (context) => DraggableScrollableSheet(
+                    initialChildSize: 0.6,
+                    minChildSize: 0.4,
+                    maxChildSize: 0.9,
+                    expand: false,
+                    builder:
+                        (context, scrollController) => Column(
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 16),
+                              child: Text(
+                                '简介',
+                                style: Theme.of(context).textTheme.titleLarge
+                                    ?.copyWith(fontWeight: FontWeight.bold),
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 48),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+                            Expanded(
+                              child: ListView(
+                                controller: scrollController,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24,
+                                ),
+                                children: [
+                                  _buildIntroHtml(
+                                    intro,
+                                    baseStyle: TextStyle(
+                                      fontSize: 16,
+                                      height: 1.8,
+                                      color:
+                                          Theme.of(
+                                            context,
+                                          ).colorScheme.onSurface,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 48),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                  ),
+            ),
           ),
     );
   }
