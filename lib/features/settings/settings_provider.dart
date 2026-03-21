@@ -79,7 +79,7 @@ class AppSettings {
     this.fontSize = 18.0,
     this.readerFirstLineIndent = false,
     this.readerLineHeight = 1.6,
-    this.readerViewMode = ReaderViewMode.scroll,
+    this.readerViewMode = ReaderViewMode.paged,
     this.theme = 'system',
     this.appFontFamily = '',
     this.appFontFileName = '',
@@ -655,7 +655,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
 
 ReaderViewMode _parseReaderViewMode(String? raw) {
   if (raw == null || raw.isEmpty) {
-    return ReaderViewMode.scroll;
+    return ReaderViewMode.paged;
   }
 
   for (final mode in ReaderViewMode.values) {
@@ -664,7 +664,7 @@ ReaderViewMode _parseReaderViewMode(String? raw) {
     }
   }
 
-  return ReaderViewMode.scroll;
+  return ReaderViewMode.paged;
 }
 
 /// 设置提供者

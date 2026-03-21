@@ -12,8 +12,8 @@ class ReadingSettingsPage extends ConsumerWidget {
     final settings = ref.watch(settingsProvider);
     final notifier = ref.read(settingsProvider.notifier);
     const readerViewModeLabels = {
-      ReaderViewMode.scroll: '滑动翻页',
       ReaderViewMode.paged: '左右翻页',
+      ReaderViewMode.scroll: '滑动翻页',
     };
     const convertTypeLabels = {'none': '关闭', 't2s': '繁转简', 's2t': '简转繁'};
     final currentConvertTypeLabel =
@@ -65,10 +65,14 @@ class ReadingSettingsPage extends ConsumerWidget {
                 ),
               ),
               ListTile(
-                leading: const Icon(Icons.swap_horiz),
+                leading: Icon(
+                  settings.readerViewMode == ReaderViewMode.paged
+                      ? Icons.swap_horiz
+                      : Icons.swap_vert,
+                ),
                 title: const Text('阅读方式'),
                 subtitle: Text(
-                  readerViewModeLabels[settings.readerViewMode] ?? '滑动翻页',
+                  readerViewModeLabels[settings.readerViewMode] ?? '左右翻页',
                 ),
                 trailing: const Icon(Icons.chevron_right, size: 20),
                 onTap:
@@ -79,8 +83,8 @@ class ReadingSettingsPage extends ConsumerWidget {
                       currentValue: settings.readerViewMode,
                       options: readerViewModeLabels,
                       icons: const {
+                        ReaderViewMode.paged: Icons.swap_horiz,
                         ReaderViewMode.scroll: Icons.swap_vert,
-                        ReaderViewMode.paged: Icons.menu_book,
                       },
                       onSelected: notifier.setReaderViewMode,
                     ),
