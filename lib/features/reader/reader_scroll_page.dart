@@ -3436,7 +3436,10 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
   String _getDisplayTitle(AppSettings settings) {
     if (_loading) return '加载中';
     String title = _chapter?.title ?? '';
-    if (title.isNotEmpty && settings.cleanChapterTitle) {
+    if (title.isNotEmpty &&
+        settings.isCleanChapterTitleEnabled(
+          AppSettings.cleanChapterTitleReaderTitleScope,
+        )) {
       // 混合正则：
       // 处理 【第一话】 或非英文前缀
       // 处理 『「〈 分隔符

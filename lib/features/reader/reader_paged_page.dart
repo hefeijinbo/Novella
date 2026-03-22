@@ -1798,7 +1798,9 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
   String _displayTitle(AppSettings settings) {
     return buildReaderDisplayTitle(
       loading: _loading,
-      cleanChapterTitle: settings.cleanChapterTitle,
+      cleanChapterTitle: settings.isCleanChapterTitleEnabled(
+        AppSettings.cleanChapterTitleReaderTitleScope,
+      ),
       chapterTitle: _chapter?.title,
       bookTitle: widget.bookTitle,
     );

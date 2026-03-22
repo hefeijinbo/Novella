@@ -28,7 +28,7 @@ class AppSettings {
   final int fontCacheLimit; // 10-60
   final String homeRankType; // 'daily'（日）, 'weekly'（周）, 'monthly'（月）
   final bool oledBlack;
-  final bool cleanChapterTitle;
+  final List<String> cleanChapterTitleScopes;
   final bool ignoreJapanese;
   final bool ignoreAI;
   final bool ignoreLevel6;
@@ -73,6 +73,12 @@ class AppSettings {
     'shelf',
     'history',
   ];
+  static const cleanChapterTitleContinueReadingScope = 'continueReading';
+  static const cleanChapterTitleReaderTitleScope = 'readerTitle';
+  static const defaultCleanChapterTitleScopes = [
+    cleanChapterTitleContinueReadingScope,
+    cleanChapterTitleReaderTitleScope,
+  ];
 
   const AppSettings({
     this.isLoaded = false,
@@ -90,7 +96,7 @@ class AppSettings {
     this.fontCacheLimit = 30,
     this.homeRankType = 'weekly',
     this.oledBlack = false,
-    this.cleanChapterTitle = true,
+    this.cleanChapterTitleScopes = defaultCleanChapterTitleScopes,
     this.ignoreJapanese = false,
     this.ignoreAI = false,
     this.ignoreLevel6 = true, // 默认开启 - 隐藏 Level6 书籍
@@ -141,6 +147,7 @@ class AppSettings {
     String? homeRankType,
     bool? oledBlack,
     bool? cleanChapterTitle,
+    List<String>? cleanChapterTitleScopes,
     bool? ignoreJapanese,
     bool? ignoreAI,
     bool? ignoreLevel6,
@@ -181,7 +188,12 @@ class AppSettings {
       fontCacheLimit: fontCacheLimit ?? this.fontCacheLimit,
       homeRankType: homeRankType ?? this.homeRankType,
       oledBlack: oledBlack ?? this.oledBlack,
-      cleanChapterTitle: cleanChapterTitle ?? this.cleanChapterTitle,
+      cleanChapterTitleScopes:
+          cleanChapterTitle != null
+              ? (cleanChapterTitle
+                  ? AppSettings.defaultCleanChapterTitleScopes
+                  : const <String>[])
+              : (cleanChapterTitleScopes ?? this.cleanChapterTitleScopes),
       ignoreJapanese: ignoreJapanese ?? this.ignoreJapanese,
       ignoreAI: ignoreAI ?? this.ignoreAI,
       ignoreLevel6: ignoreLevel6 ?? this.ignoreLevel6,
@@ -218,6 +230,11 @@ class AppSettings {
   /// 检查指定范围是否启用书籍类型角标
   bool isBookTypeBadgeEnabled(String scope) =>
       bookTypeBadgeScopes.contains(scope);
+
+  bool get cleanChapterTitle => cleanChapterTitleScopes.isNotEmpty;
+
+  bool isCleanChapterTitleEnabled(String scope) =>
+      cleanChapterTitleScopes.contains(scope);
 }
 
 /// 基于 Riverpod 3.x Notifier API 的设置通知器
@@ -265,7 +282,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
       fontCacheLimit: prefs.getInt('setting_fontCacheLimit') ?? 30,
       homeRankType: prefs.getString('setting_homeRankType') ?? 'weekly',
       oledBlack: prefs.getBool('setting_oledBlack') ?? false,
-      cleanChapterTitle: prefs.getBool('setting_cleanChapterTitle') ?? true,
+      cleanChapterTitleScopes: _loadCleanChapterTitleScopes(prefs),
       ignoreJapanese: prefs.getBool('setting_ignoreJapanese') ?? false,
       ignoreAI: prefs.getBool('setting_ignoreAI') ?? false,
       ignoreLevel6: prefs.getBool('setting_ignoreLevel6') ?? true, // 默认开启
@@ -335,6 +352,10 @@ class SettingsNotifier extends Notifier<AppSettings> {
     await prefs.setString('setting_homeRankType', state.homeRankType);
     await prefs.setBool('setting_oledBlack', state.oledBlack);
     await prefs.setBool('setting_cleanChapterTitle', state.cleanChapterTitle);
+    await prefs.setStringList(
+      'setting_cleanChapterTitleScopes',
+      state.cleanChapterTitleScopes,
+    );
     await prefs.setBool('setting_ignoreJapanese', state.ignoreJapanese);
     await prefs.setBool('setting_ignoreAI', state.ignoreAI);
     await prefs.setBool('setting_ignoreLevel6', state.ignoreLevel6);
@@ -485,6 +506,11 @@ class SettingsNotifier extends Notifier<AppSettings> {
 
   void setCleanChapterTitle(bool value) {
     state = state.copyWith(cleanChapterTitle: value);
+    _save();
+  }
+
+  void setCleanChapterTitleScopes(List<String> scopes) {
+    state = state.copyWith(cleanChapterTitleScopes: List<String>.from(scopes));
     _save();
   }
 
@@ -668,6 +694,23 @@ ReaderViewMode _parseReaderViewMode(String? raw) {
 }
 
 /// 设置提供者
+List<String> _loadCleanChapterTitleScopes(SharedPreferences prefs) {
+  if (prefs.containsKey('setting_cleanChapterTitleScopes')) {
+    return List<String>.from(
+      prefs.getStringList('setting_cleanChapterTitleScopes') ?? const [],
+    );
+  }
+
+  if (prefs.containsKey('setting_cleanChapterTitle')) {
+    final enabled = prefs.getBool('setting_cleanChapterTitle') ?? true;
+    return enabled
+        ? AppSettings.defaultCleanChapterTitleScopes
+        : const <String>[];
+  }
+
+  return AppSettings.defaultCleanChapterTitleScopes;
+}
+
 final settingsProvider = NotifierProvider<SettingsNotifier, AppSettings>(
   SettingsNotifier.new,
 );

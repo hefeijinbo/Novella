@@ -1928,7 +1928,11 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
                                           final settings = ref.read(
                                             settingsProvider,
                                           );
-                                          if (settings.cleanChapterTitle) {
+                                          if (settings
+                                              .isCleanChapterTitleEnabled(
+                                                AppSettings
+                                                    .cleanChapterTitleContinueReadingScope,
+                                              )) {
                                             // 智能混合正则：
                                             // 处理 【第一话】 或非英文前缀
                                             // 处理 『「〈 分隔符

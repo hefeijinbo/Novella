@@ -1,6 +1,9 @@
+import 'package:adaptive_platform_ui/adaptive_platform_ui.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:novella/core/widgets/m3e_loading_indicator.dart';
+
+const int _readerImagePreviewMaxZoomPercent = 600;
 
 Future<void> showReaderImagePreview(
   BuildContext context, {
@@ -12,90 +15,16 @@ Future<void> showReaderImagePreview(
     return;
   }
 
-  final caption = alt?.trim();
-
   await showGeneralDialog<void>(
     context: context,
     barrierDismissible: true,
     barrierLabel: 'reader_image_preview',
-    barrierColor: Colors.black.withValues(alpha: 0.92),
+    barrierColor: Colors.black.withValues(alpha: 0.96),
     transitionDuration: const Duration(milliseconds: 180),
     pageBuilder: (dialogContext, _, __) {
-      final size = MediaQuery.sizeOf(dialogContext);
-      final maxWidth = size.width * 0.94;
-      final maxHeight = size.height * 0.86;
-
-      return Material(
-        color: Colors.transparent,
-        child: SafeArea(
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: GestureDetector(
-                  onTap: () => Navigator.of(dialogContext).maybePop(),
-                  child: const SizedBox.expand(),
-                ),
-              ),
-              Center(
-                child: GestureDetector(
-                  onTap: () {},
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: maxWidth,
-                      maxHeight: maxHeight,
-                    ),
-                    child: InteractiveViewer(
-                      minScale: 1,
-                      maxScale: 4,
-                      child: CachedNetworkImage(
-                        imageUrl: trimmedUrl,
-                        memCacheWidth: 1600,
-                        fit: BoxFit.contain,
-                        placeholder:
-                            (context, url) => const Center(
-                              child: M3ELoadingIndicator(size: 24),
-                            ),
-                        errorWidget:
-                            (context, url, error) => Icon(
-                              Icons.broken_image_outlined,
-                              color: Colors.white.withValues(alpha: 0.85),
-                              size: 40,
-                            ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 8,
-                right: 8,
-                child: IconButton(
-                  onPressed: () => Navigator.of(dialogContext).maybePop(),
-                  icon: const Icon(Icons.close),
-                  color: Colors.white,
-                  style: IconButton.styleFrom(
-                    backgroundColor: Colors.black.withValues(alpha: 0.35),
-                  ),
-                ),
-              ),
-              if (caption != null && caption.isNotEmpty)
-                Positioned(
-                  left: 24,
-                  right: 24,
-                  bottom: 16,
-                  child: Text(
-                    caption,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
+      return _ReaderImagePreviewDialog(
+        imageUrl: trimmedUrl,
+        alt: alt?.trim(),
       );
     },
     transitionBuilder: (context, animation, secondaryAnimation, child) {
@@ -107,12 +36,114 @@ Future<void> showReaderImagePreview(
       return FadeTransition(
         opacity: curved,
         child: ScaleTransition(
-          scale: Tween<double>(begin: 0.96, end: 1).animate(curved),
+          scale: Tween<double>(begin: 0.98, end: 1).animate(curved),
           child: child,
         ),
       );
     },
   );
+}
+
+class _ReaderImagePreviewDialog extends StatefulWidget {
+  final String imageUrl;
+  final String? alt;
+
+  const _ReaderImagePreviewDialog({required this.imageUrl, this.alt});
+
+  @override
+  State<_ReaderImagePreviewDialog> createState() =>
+      _ReaderImagePreviewDialogState();
+}
+
+class _ReaderImagePreviewDialogState extends State<_ReaderImagePreviewDialog> {
+  final TransformationController _transformationController =
+      TransformationController();
+
+  @override
+  void dispose() {
+    _transformationController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+
+    return Material(
+      color: Colors.black,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => Navigator.of(context).maybePop(),
+            child: const SizedBox.expand(),
+          ),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {},
+            child: InteractiveViewer(
+              transformationController: _transformationController,
+              minScale: 1,
+              maxScale: _readerImagePreviewMaxZoomPercent / 100,
+              boundaryMargin: const EdgeInsets.all(64),
+              clipBehavior: Clip.none,
+              child: SizedBox(
+                width: size.width,
+                height: size.height,
+                child: Semantics(
+                  label: widget.alt?.isNotEmpty == true ? widget.alt : '图片预览',
+                  child: CachedNetworkImage(
+                    imageUrl: widget.imageUrl,
+                    memCacheWidth: 2200,
+                    width: size.width,
+                    height: size.height,
+                    fit: BoxFit.contain,
+                    placeholder:
+                        (context, url) => const Center(
+                          child: M3ELoadingIndicator(size: 26),
+                        ),
+                    errorWidget:
+                        (context, url, error) => Icon(
+                          Icons.broken_image_outlined,
+                          color: Colors.white.withValues(alpha: 0.85),
+                          size: 44,
+                        ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Center(
+                  child: AdaptiveButton.child(
+                    onPressed: () => Navigator.of(context).maybePop(),
+                    style: AdaptiveButtonStyle.gray,
+                    size: AdaptiveButtonSize.medium,
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.close_rounded, size: 18),
+                        SizedBox(width: 6),
+                        Text('退出'),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class ReaderRoundedNetworkImage extends StatelessWidget {
