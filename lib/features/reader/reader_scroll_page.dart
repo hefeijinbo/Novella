@@ -1500,6 +1500,40 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
     });
   }
 
+  Future<void> _openReaderBackgroundPage() async {
+    final settings = ref.read(settingsProvider);
+    final navigator = Navigator.of(context);
+    final shouldHideNativeButtons =
+        Platform.isIOS && settings.useIOS26Style && _barsVisible;
+
+    if (shouldHideNativeButtons && mounted) {
+      setState(() {
+        _barsVisible = false;
+        _barsAnimController.reverse();
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+    }
+
+    try {
+      final route =
+          Platform.isIOS
+              ? CupertinoPageRoute<void>(
+                builder: (context) => const ReaderBackgroundPage(),
+              )
+              : MaterialPageRoute<void>(
+                builder: (context) => const ReaderBackgroundPage(),
+              );
+      await navigator.push(route);
+    } finally {
+      if (shouldHideNativeButtons && mounted) {
+        setState(() {
+          _barsVisible = true;
+          _barsAnimController.forward();
+        });
+      }
+    }
+  }
+
   /// 保存滚动进度（本地+服务端）
   Future<void> _saveCurrentPosition() async {
     if (_chapter == null || _blocksResult == null) return;
@@ -2812,18 +2846,11 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
                               onTap: () {
                                 final fullTitle = _chapter?.title;
                                 if (fullTitle != null && fullTitle.isNotEmpty) {
-                                  ScaffoldMessenger.of(context)
-                                    ..hideCurrentSnackBar()
-                                    ..showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                          fullTitle,
-                                          style: const TextStyle(fontSize: 14),
-                                        ),
-                                        behavior: SnackBarBehavior.floating,
-                                        duration: const Duration(seconds: 4),
-                                      ),
-                                    );
+                                  AdaptiveSnackBar.show(
+                                    context,
+                                    message: fullTitle,
+                                    duration: const Duration(seconds: 4),
+                                  );
                                 }
                               },
                               child: _MarqueeText(
@@ -3017,11 +3044,7 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
                       _showChapterListSheet(context);
                       break;
                     case 'background':
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (context) => const ReaderBackgroundPage(),
-                        ),
-                      );
+                      unawaited(_openReaderBackgroundPage());
                       break;
                   }
                 },
@@ -3074,12 +3097,7 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
                           _showChapterListSheet(context);
                           break;
                         case 'background':
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder:
-                                  (context) => const ReaderBackgroundPage(),
-                            ),
-                          );
+                          unawaited(_openReaderBackgroundPage());
                           break;
                       }
                     },

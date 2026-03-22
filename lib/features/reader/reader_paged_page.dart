@@ -124,6 +124,7 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
   final Map<String, String> _indentedBlockHtmlCache = {};
   Map<String, String> _footnoteNotesById = const {};
   bool _exitInProgress = false;
+  bool _topOverlayVisible = true;
   ChapterContent? _chapter;
   List<_ReaderBlock> _blocks = const [];
   Map<String, int> _indexByXPath = const {};
@@ -1822,20 +1823,11 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
       return;
     }
 
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    if (messenger == null) {
-      return;
-    }
-
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(fullTitle, style: const TextStyle(fontSize: 14)),
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 4),
-        ),
-      );
+    AdaptiveSnackBar.show(
+      context,
+      message: fullTitle,
+      duration: const Duration(seconds: 4),
+    );
   }
 
   Future<void> _exitPagedReader(BuildContext context) async {
@@ -1852,10 +1844,40 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
         _openChapterList(context);
         return;
       case 'background':
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (context) => const ReaderBackgroundPage()),
-        );
+        unawaited(_openReaderBackgroundPage(context));
         return;
+    }
+  }
+
+  Future<void> _openReaderBackgroundPage(BuildContext context) async {
+    final settings = ref.read(settingsProvider);
+    final navigator = Navigator.of(context);
+    final shouldHideNativeOverlay =
+        PlatformInfo.isIOS && settings.useIOS26Style && _topOverlayVisible;
+
+    if (shouldHideNativeOverlay && mounted) {
+      setState(() {
+        _topOverlayVisible = false;
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+    }
+
+    try {
+      final route =
+          PlatformInfo.isIOS
+              ? CupertinoPageRoute<void>(
+                builder: (context) => const ReaderBackgroundPage(),
+              )
+              : MaterialPageRoute<void>(
+                builder: (context) => const ReaderBackgroundPage(),
+              );
+      await navigator.push(route);
+    } finally {
+      if (shouldHideNativeOverlay && mounted) {
+        setState(() {
+          _topOverlayVisible = true;
+        });
+      }
     }
   }
 
@@ -2024,6 +2046,10 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
     AppSettings settings,
     Color textColor,
   ) {
+    if (!_topOverlayVisible) {
+      return const SizedBox.shrink();
+    }
+
     return Positioned(
       top: MediaQuery.paddingOf(context).top + _topBarVerticalInset,
       left: _topBarHorizontalInset,
