@@ -18,6 +18,12 @@ public class AdaptivePlatformUiPlugin: NSObject, FlutterPlugin {
             withId: "adaptive_platform_ui/ios26_button"
         )
 
+        let ios26ActionGroupFactory = iOS26ActionGroupViewFactory(messenger: registrar.messenger())
+        registrar.register(
+            ios26ActionGroupFactory,
+            withId: "adaptive_platform_ui/ios26_action_group"
+        )
+
         // Register iOS 26 Switch platform view factory
         let ios26SwitchFactory = iOS26SwitchViewFactory(messenger: registrar.messenger())
         registrar.register(

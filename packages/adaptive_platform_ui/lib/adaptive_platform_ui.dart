@@ -51,6 +51,8 @@ export 'src/widgets/adaptive_popup_menu_button.dart';
 export 'src/widgets/adaptive_context_menu.dart';
 export 'src/widgets/adaptive_scaffold.dart';
 export 'src/widgets/adaptive_app_bar_action.dart';
+export 'src/widgets/adaptive_action_group.dart';
+export 'src/widgets/adaptive_action_group_item.dart';
 export 'src/widgets/adaptive_snackbar.dart';
 export 'src/widgets/adaptive_date_picker.dart';
 export 'src/widgets/adaptive_time_picker.dart';
@@ -62,9 +64,11 @@ export 'src/widgets/adaptive_floating_action_button.dart';
 export 'src/widgets/adaptive_form_section.dart';
 export 'src/widgets/adaptive_expansion_tile.dart';
 export 'src/widgets/adaptive_blur_view.dart';
+export 'src/widgets/adaptive_glass_group.dart';
 
 // iOS 26 specific widgets (for advanced usage)
 export 'src/widgets/ios26/ios26_button.dart';
+export 'src/widgets/ios26/ios26_action_group.dart';
 export 'src/widgets/ios26/ios26_switch.dart';
 export 'src/widgets/ios26/ios26_slider.dart';
 export 'src/widgets/ios26/ios26_segmented_control.dart';
