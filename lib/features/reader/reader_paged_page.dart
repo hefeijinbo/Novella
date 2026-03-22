@@ -4,8 +4,10 @@ import 'package:adaptive_platform_ui/adaptive_platform_ui.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
+import 'package:battery_plus/battery_plus.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 import 'package:novella/core/utils/cover_url_utils.dart';
@@ -121,9 +123,16 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
   final _progressService = ReadingProgressService();
   final _readingTimeService = ReadingTimeService();
   final _pageController = PageController();
+  final Battery _battery = Battery();
+  final ValueNotifier<int> _batteryLevelNotifier = ValueNotifier<int>(100);
+  final ValueNotifier<BatteryState> _batteryStateNotifier =
+      ValueNotifier<BatteryState>(BatteryState.unknown);
+  final ValueNotifier<String> _timeStringNotifier = ValueNotifier<String>('');
   static final Map<String, ColorScheme> _schemeCache = {};
   final Map<String, String> _indentedBlockHtmlCache = {};
   Map<String, String> _footnoteNotesById = const {};
+  Timer? _infoTimer;
+  StreamSubscription<BatteryState>? _batteryStateSubscription;
   bool _exitInProgress = false;
   bool _topOverlayVisible = true;
   ChapterContent? _chapter;
@@ -147,6 +156,8 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _targetSortNum = widget.sortNum;
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    _initInfoBar();
     _loadChapter(widget.sortNum);
     _readingTimeService.startSession();
   }
@@ -157,6 +168,41 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
     if (_dynamicColorScheme == null) {
       _extractColors();
     }
+  }
+
+  void _initInfoBar() {
+    _updateTime();
+    _updateBattery();
+
+    _batteryStateSubscription = _battery.onBatteryStateChanged.listen((state) {
+      if (!mounted) return;
+      _batteryStateNotifier.value = state;
+      _updateBattery();
+    });
+
+    _infoTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      _updateTime();
+      _updateBattery();
+    });
+  }
+
+  void _updateTime() {
+    final now = DateTime.now();
+    final hour = now.hour;
+    final minute = now.minute.toString().padLeft(2, '0');
+    final period = hour < 12 ? '上午' : '下午';
+    final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
+
+    if (!mounted) return;
+    _timeStringNotifier.value = '$period $displayHour:$minute';
+  }
+
+  Future<void> _updateBattery() async {
+    try {
+      final level = await _battery.batteryLevel;
+      if (!mounted) return;
+      _batteryLevelNotifier.value = level;
+    } catch (_) {}
   }
 
   @override
@@ -178,8 +224,14 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
       );
     }
     _readingTimeService.endSession();
+    _batteryStateSubscription?.cancel();
+    _infoTimer?.cancel();
+    _batteryLevelNotifier.dispose();
+    _batteryStateNotifier.dispose();
+    _timeStringNotifier.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _pageController.dispose();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
 
@@ -192,6 +244,8 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
     }
     if (state == AppLifecycleState.resumed) {
       _readingTimeService.startSession();
+      _updateTime();
+      _updateBattery();
     }
   }
 
@@ -2053,6 +2107,103 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
     );
   }
 
+  Widget _buildProgressPill(
+    BuildContext context, {
+    required IconData icon,
+    required String value,
+    required Color textColor,
+  }) {
+    final foregroundColor = textColor.withValues(alpha: 0.85);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: textColor.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: foregroundColor),
+          const SizedBox(width: 6),
+          Text(
+            value,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: foregroundColor),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomInfoStrip(BuildContext context, Color textColor) {
+    final subTextColor = textColor.withValues(alpha: 0.65);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        ValueListenableBuilder<String>(
+          valueListenable: _timeStringNotifier,
+          builder: (context, timeString, _) {
+            return Text(
+              timeString,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: subTextColor,
+                fontSize: 11,
+              ),
+            );
+          },
+        ),
+        const SizedBox(width: 8),
+        AnimatedBuilder(
+          animation: Listenable.merge([
+            _batteryLevelNotifier,
+            _batteryStateNotifier,
+          ]),
+          builder: (context, _) {
+            final batteryLevel = _batteryLevelNotifier.value;
+            final batteryState = _batteryStateNotifier.value;
+            final widthFactor = (batteryLevel / 100.0).clamp(0.0, 1.0);
+
+            final barColor = () {
+              if (batteryState == BatteryState.charging) {
+                return Colors.blue;
+              }
+              if (batteryLevel <= 15) {
+                return Colors.red;
+              }
+              if (batteryLevel <= 35) {
+                return Colors.yellow;
+              }
+              return const Color(0xFF34C759);
+            }();
+
+            return Container(
+              width: 36,
+              height: 6,
+              decoration: BoxDecoration(
+                color: subTextColor.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(3),
+              ),
+              alignment: Alignment.centerLeft,
+              child: FractionallySizedBox(
+                widthFactor: widthFactor,
+                heightFactor: 1.0,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: barColor,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
@@ -2270,11 +2421,19 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
                                                 context,
                                               ).textTheme.bodySmall?.copyWith(
                                                 color: textColor.withValues(
-                                                  alpha: 0.65,
+                                                  alpha: 0.0,
                                                 ),
                                               ),
                                             ),
                                           ),
+                                          _buildProgressPill(
+                                            context,
+                                            icon: Icons.book_outlined,
+                                            value:
+                                                '$_targetSortNum/${widget.totalChapters}',
+                                            textColor: textColor,
+                                          ),
+                                          const SizedBox(width: 8),
                                           Container(
                                             padding: const EdgeInsets.symmetric(
                                               horizontal: 12,
@@ -2287,18 +2446,47 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
                                               borderRadius:
                                                   BorderRadius.circular(999),
                                             ),
-                                            child: Text(
-                                              '${_currentPage + 1} / ${pages.length}',
-                                              style: Theme.of(
-                                                context,
-                                              ).textTheme.bodySmall?.copyWith(
-                                                color: textColor.withValues(
-                                                  alpha: 0.85,
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(
+                                                  Icons.menu_book_outlined,
+                                                  size: 15,
+                                                  color: textColor.withValues(
+                                                    alpha: 0.85,
+                                                  ),
                                                 ),
-                                              ),
+                                                const SizedBox(width: 6),
+                                                Text(
+                                                  '${_currentPage + 1}/${pages.length}',
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .bodySmall
+                                                      ?.copyWith(
+                                                        color: textColor
+                                                            .withValues(
+                                                              alpha: 0.85,
+                                                            ),
+                                                      ),
+                                                ),
+                                              ],
                                             ),
                                           ),
                                         ],
+                                      ),
+                                    ),
+                                  if (measurementReady && pages.isNotEmpty)
+                                    Positioned(
+                                      left: 16,
+                                      bottom:
+                                          MediaQuery.paddingOf(context).bottom +
+                                          _indicatorBottomGap +
+                                          6,
+                                      child: IgnorePointer(
+                                        child: _buildBottomInfoStrip(
+                                          context,
+                                          textColor,
+                                        ),
                                       ),
                                     ),
                                 ],
