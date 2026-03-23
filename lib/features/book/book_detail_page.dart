@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:novella/src/widgets/book_cover_image.dart';
 import 'package:novella/core/utils/cover_url_utils.dart';
 import 'package:flutter/material.dart';
@@ -1776,14 +1777,9 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
           ),
           actions: [
             IconButton(
-              icon: const Icon(Icons.bug_report),
-              onPressed: () {
-                final pos = _bookInfo?.serverReadPosition?.position;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Server XPath: ${pos ?? "null"}')),
-                );
-              },
-              tooltip: 'Debug Server XPath',
+              onPressed: _showUploaderInfoSheet,
+              icon: const Icon(Icons.contact_page_outlined),
+              tooltip: '上传者信息',
             ),
             IconButton(
               onPressed: () {
@@ -1928,11 +1924,10 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
                                           final settings = ref.read(
                                             settingsProvider,
                                           );
-                                          if (settings
-                                              .isCleanChapterTitleEnabled(
-                                                AppSettings
-                                                    .cleanChapterTitleContinueReadingScope,
-                                              )) {
+                                          if (settings.isCleanChapterTitleEnabled(
+                                            AppSettings
+                                                .cleanChapterTitleContinueReadingScope,
+                                          )) {
                                             // 智能混合正则：
                                             // 处理 【第一话】 或非英文前缀
                                             // 处理 『「〈 分隔符
@@ -2179,6 +2174,22 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
     );
   }
 
+  void _showUploaderInfoSheet() {
+    final sheetTheme = _effectiveDynamicThemeData();
+
+    showModalBottomSheet(
+      context: context,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: sheetTheme.colorScheme.surface,
+      builder:
+          (context) => Theme(
+            data: sheetTheme,
+            child: _UploaderInfoSheetContent(user: _bookInfo?.user),
+          ),
+    );
+  }
+
   void _showFullIntro(BuildContext context, String intro) {
     final sheetTheme = _effectiveDynamicThemeData();
     showModalBottomSheet(
@@ -2326,9 +2337,9 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
             continue;
           }
           buffer.write(
-            const HtmlEscape(HtmlEscapeMode.element).convert(
-              decodeReaderHtmlTextEntities(node.text),
-            ),
+            const HtmlEscape(
+              HtmlEscapeMode.element,
+            ).convert(decodeReaderHtmlTextEntities(node.text)),
           );
           justWroteBreak = false;
           continue;
@@ -2448,6 +2459,206 @@ class BookDetailPageState extends ConsumerState<BookDetailPage> {
                   ),
                 )
                 .toList(),
+      ),
+    );
+  }
+}
+
+class _UploaderInfoSheetContent extends StatelessWidget {
+  final UserInfo? user;
+
+  const _UploaderInfoSheetContent({required this.user});
+
+  String get _displayName {
+    final trimmedName = user?.userName.trim() ?? '';
+    return trimmedName.isEmpty ? '未知上传者' : trimmedName;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
+    final hasUserId = (user?.id ?? 0) > 0;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.account_circle_outlined,
+                color: colorScheme.primary,
+                size: 22,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                '上传者信息',
+                style: textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            '查看当前书籍的上传者资料',
+            style: textTheme.labelLarge?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerHighest.withValues(
+                alpha: 0.55,
+              ),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              children: [
+                _UserAvatarView(user: user, radius: 28),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _displayName,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        hasUserId ? '书籍上传者' : '暂无上传者资料',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (hasUserId) ...[
+            const SizedBox(height: 12),
+            _BookDetailSheetInfoItem(
+              icon: Icons.badge_outlined,
+              label: '用户 ID',
+              value: '${user!.id}',
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _BookDetailSheetInfoItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _BookDetailSheetInfoItem({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final textTheme = theme.textTheme;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: colorScheme.primary, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: textTheme.labelMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: textTheme.bodyLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UserAvatarView extends StatelessWidget {
+  final UserInfo? user;
+  final double radius;
+
+  const _UserAvatarView({required this.user, required this.radius});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final trimmedName = user?.userName.trim() ?? '';
+    final displayName = trimmedName.isEmpty ? '?' : trimmedName;
+    final avatarUrl = user?.avatar.trim() ?? '';
+    final avatarSize = radius * 2;
+    final defaultAvatar = CircleAvatar(
+      radius: radius,
+      backgroundColor: colorScheme.surfaceContainerHighest,
+      child: Text(
+        displayName.substring(0, 1),
+        style: TextStyle(fontWeight: FontWeight.w700, fontSize: radius * 0.85),
+      ),
+    );
+
+    if (avatarUrl.isEmpty) {
+      return SizedBox(
+        width: avatarSize,
+        height: avatarSize,
+        child: defaultAvatar,
+      );
+    }
+
+    return SizedBox(
+      width: avatarSize,
+      height: avatarSize,
+      child: CachedNetworkImage(
+        imageUrl: avatarUrl,
+        memCacheWidth: (avatarSize * 4).round(),
+        imageBuilder:
+            (context, imageProvider) =>
+                CircleAvatar(radius: radius, backgroundImage: imageProvider),
+        placeholder: (context, url) => defaultAvatar,
+        errorWidget: (context, url, error) => defaultAvatar,
       ),
     );
   }

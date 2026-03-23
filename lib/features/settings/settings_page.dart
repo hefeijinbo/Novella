@@ -8,6 +8,7 @@ import 'package:novella/features/settings/pages/appearance_settings_page.dart';
 import 'package:novella/features/settings/pages/cache_settings_page.dart';
 import 'package:novella/features/settings/pages/sync_settings_page.dart';
 import 'package:novella/features/settings/widgets/settings_header_card.dart';
+import 'package:novella/features/settings/widgets/settings_profile_entry.dart';
 import 'package:novella/features/settings/pages/about_settings_page.dart';
 
 export 'package:novella/features/settings/settings_provider.dart';
@@ -32,19 +33,24 @@ class SettingsPage extends ConsumerWidget {
                     padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
                     child: SizedBox(
                       height:
-                          48.0 +
-                          Theme.of(context).visualDensity.vertical *
-                              4.0, // Adaptive height: 48px (Mobile) / 40px (Desktop)
-                      child: Row(
+                          48.0 + Theme.of(context).visualDensity.vertical * 4.0,
+                      child: Stack(
                         children: [
-                          Text(
-                            '设置',
-                            style: Theme.of(
-                              context,
-                            ).textTheme.headlineMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: Theme.of(context).colorScheme.onSurface,
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              '设置',
+                              style: Theme.of(
+                                context,
+                              ).textTheme.headlineMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: Theme.of(context).colorScheme.onSurface,
+                              ),
                             ),
+                          ),
+                          const Align(
+                            alignment: Alignment.centerRight,
+                            child: SettingsProfileEntry(),
                           ),
                         ],
                       ),

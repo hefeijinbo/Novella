@@ -335,6 +335,7 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
 
         return MaterialApp(
           title: 'Novella',
+          debugShowCheckedModeBanner: false,
           // 全局兜底：确保无 AppBar/无 AnnotatedRegion 的页面也能持续下发透明导航栏样式。
           // 解决“二次启动自动登录 loading -> 主页首次不沉浸；进详情页后恢复并沿用”的样式被覆盖问题。
           builder: (context, child) {
