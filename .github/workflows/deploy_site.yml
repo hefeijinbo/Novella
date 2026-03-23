@@ -1,0 +1,80 @@
+name: Deploy Novella Site
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "site/**"
+      - "README.md"
+      - "assets/screenshots_*.PNG"
+      - ".github/workflows/deploy_site.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      SITE_URL: ${{ vars.SITE_URL || 'https://novella.celia.sh' }}
+      SITE_BASE_PATH: ${{ vars.SITE_BASE_PATH || '/' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Dart
+        uses: dart-lang/setup-dart@v1
+
+      - name: Activate Jaspr CLI
+        run: |
+          dart pub global activate jaspr_cli
+          echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install CSS dependencies
+        working-directory: site
+        run: npm install
+
+      - name: Install site dependencies
+        working-directory: site
+        run: dart pub get
+
+      - name: Fetch GitHub release data
+        working-directory: site
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: dart run tool/fetch_site_data.dart
+
+      - name: Build CSS
+        working-directory: site
+        run: npx @tailwindcss/cli -i src/input.css -o web/styles.css --minify
+
+      - name: Build static site
+        working-directory: site
+        run: jaspr build --sitemap-domain "$SITE_URL"
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy site/build/jaspr --project-name=${{ vars.CF_PAGES_PROJECT_NAME || 'novella' }}

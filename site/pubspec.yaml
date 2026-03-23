@@ -1,0 +1,21 @@
+name: novella_site
+description: Novella static marketing site built with Jaspr.
+publish_to: none
+
+environment:
+  sdk: ^3.8.0
+
+dependencies:
+  jaspr: ^0.22.3
+  jaspr_router: ^0.8.1
+  markdown: ^7.3.0
+
+dev_dependencies:
+  build_runner: ^2.5.4
+  build_web_compilers: ^4.4.16
+  jaspr_builder: ^0.22.3
+  lints: ^6.0.0
+  test: ^1.25.15
+
+jaspr:
+  mode: static
