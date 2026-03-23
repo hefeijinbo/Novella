@@ -4,6 +4,7 @@ import 'package:adaptive_platform_ui/adaptive_platform_ui.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
@@ -153,10 +154,16 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
   String _restoredLayoutKey = '';
   String _lastMeasureKey = '';
   Map<int, double> _measuredBlockHeights = const {};
+  Map<int, double> _pendingMeasuredBlockHeights = const {};
   bool _loading = true;
+  bool _measurementFlushScheduled = false;
   int _currentPage = 0;
   late int _targetSortNum;
   int _loadVersion = 0;
+  String _activeMeasureKey = '';
+  String _pendingMeasureKey = '';
+  String _measurementLayerCacheKey = '';
+  Widget? _cachedMeasurementLayer;
 
   @override
   void initState() {
@@ -460,8 +467,16 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
       _restoredLayoutKey = '';
       _lastMeasureKey = '';
       _measuredBlockHeights = const {};
+      _pendingMeasuredBlockHeights = const {};
       _footnoteNotesById = const {};
     });
+    _measurementFlushScheduled = false;
+    _pendingMeasureKey = '';
+    _activeMeasureKey = '';
+    _measurementLayerCacheKey = '';
+    _cachedMeasurementLayer = null;
+    await SchedulerBinding.instance.endOfFrame;
+    if (!mounted || version != _loadVersion) return;
     try {
       final settings = ref.read(settingsProvider);
       final chapter = await _chapterService.getNovelContent(
@@ -1759,35 +1774,67 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
 
   void _onMeasuredBlock(int index, double height, String measureKey) {
     final normalizedHeight = height.isFinite ? height : 0.0;
-    if (normalizedHeight <= 0) {
+    if (normalizedHeight <= 0 || !mounted || measureKey != _activeMeasureKey) {
       return;
     }
 
-    if (_lastMeasureKey != measureKey) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _lastMeasureKey = measureKey;
-        _measuredBlockHeights = {index: normalizedHeight};
-      });
-      return;
-    }
-
-    final previous = _measuredBlockHeights[index];
+    final previous =
+        measureKey == _lastMeasureKey
+            ? _measuredBlockHeights[index]
+            : _pendingMeasuredBlockHeights[index];
     if (previous != null && (previous - normalizedHeight).abs() < 0.5) {
       return;
     }
 
-    if (!mounted) {
+    if (_pendingMeasureKey != measureKey) {
+      _pendingMeasureKey = measureKey;
+      _pendingMeasuredBlockHeights = {index: normalizedHeight};
+    } else {
+      _pendingMeasuredBlockHeights = {
+        ..._pendingMeasuredBlockHeights,
+        index: normalizedHeight,
+      };
+    }
+
+    if (_measurementFlushScheduled) {
       return;
     }
 
-    setState(() {
-      _measuredBlockHeights = {
-        ..._measuredBlockHeights,
-        index: normalizedHeight,
-      };
+    _measurementFlushScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _measurementFlushScheduled = false;
+      if (!mounted ||
+          _pendingMeasureKey.isEmpty ||
+          _pendingMeasuredBlockHeights.isEmpty) {
+        return;
+      }
+
+      final flushedMeasureKey = _pendingMeasureKey;
+      final pendingHeights = _pendingMeasuredBlockHeights;
+      _pendingMeasureKey = '';
+      _pendingMeasuredBlockHeights = const {};
+
+      setState(() {
+        if (_lastMeasureKey != flushedMeasureKey) {
+          _lastMeasureKey = flushedMeasureKey;
+          _measuredBlockHeights = pendingHeights;
+          return;
+        }
+
+        final merged = Map<int, double>.from(_measuredBlockHeights);
+        var changed = false;
+        pendingHeights.forEach((blockIndex, blockHeight) {
+          final existing = merged[blockIndex];
+          if (existing == null || (existing - blockHeight).abs() >= 0.5) {
+            merged[blockIndex] = blockHeight;
+            changed = true;
+          }
+        });
+
+        if (changed) {
+          _measuredBlockHeights = merged;
+        }
+      });
     });
   }
 
@@ -2160,6 +2207,30 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
         ),
       ),
     );
+  }
+
+  Widget _measurementLayerFor({
+    required String measureKey,
+    required double width,
+    required AppSettings settings,
+    required Color textColor,
+    required Color linkColor,
+  }) {
+    final cacheKey =
+        '$measureKey|${width.toStringAsFixed(1)}|'
+        '${textColor.toARGB32()}|${linkColor.toARGB32()}';
+    if (_measurementLayerCacheKey != cacheKey ||
+        _cachedMeasurementLayer == null) {
+      _measurementLayerCacheKey = cacheKey;
+      _cachedMeasurementLayer = _buildMeasurementLayer(
+        measureKey: measureKey,
+        width: width,
+        settings: settings,
+        textColor: textColor,
+        linkColor: linkColor,
+      );
+    }
+    return _cachedMeasurementLayer!;
   }
 
   String _displayTitle(AppSettings settings) {
@@ -2602,6 +2673,7 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
                                   '${settings.fontSize.toStringAsFixed(2)}|'
                                   '${settings.readerLineHeight.toStringAsFixed(2)}|'
                                   '${settings.readerFirstLineIndent}|${_fontFamily ?? ''}';
+                              _activeMeasureKey = measureKey;
                               final measurementReady =
                                   _lastMeasureKey == measureKey &&
                                   _measuredBlockHeights.length ==
@@ -2635,7 +2707,7 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
                               }
                               return Stack(
                                 children: [
-                                  _buildMeasurementLayer(
+                                  _measurementLayerFor(
                                     measureKey: measureKey,
                                     width: contentWidth,
                                     settings: settings,
