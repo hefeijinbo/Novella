@@ -311,13 +311,14 @@ Component _buildHomeHero(
                       ),
                     ],
                   ),
-                  _anchor(
-                    releaseUrl,
-                    'GitHub Changelog →',
-                    classes:
-                        'font-semibold text-base-content/80 '
-                        'hover:text-primary transition-colors',
-                    external: true,
+                  _el(
+                    'a',
+                    attrs: {
+                      'href': '/changelog',
+                      'class':
+                          'font-semibold text-base-content/80 hover:text-primary transition-colors',
+                    },
+                    children: [_text('GitHub Changelog →')],
                   ),
                 ],
               ),
