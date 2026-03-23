@@ -16,7 +16,7 @@ class App extends StatelessComponent {
       routes: [
         Route(
           path: '/',
-          title: 'Home',
+          title: 'Novella — Open Source Light Novel Reader',
           settings: const RouteSettings(
             changeFreq: ChangeFreq.daily,
             priority: 1.0,
@@ -26,7 +26,7 @@ class App extends StatelessComponent {
         ),
         Route(
           path: '/download',
-          title: 'Download',
+          title: 'Download - Novella',
           settings: const RouteSettings(
             changeFreq: ChangeFreq.daily,
             priority: 0.9,
@@ -35,7 +35,7 @@ class App extends StatelessComponent {
         ),
         Route(
           path: '/changelog',
-          title: 'Changelog',
+          title: 'Changelog - Novella',
           settings: const RouteSettings(
             changeFreq: ChangeFreq.daily,
             priority: 0.8,
