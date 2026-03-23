@@ -33,6 +33,8 @@ import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 enum _ReaderLayoutMode { standard, immersive, center }
 
+enum _ReaderChapterOpenPosition { saved, start, end }
+
 class _FootnoteProcessingResult {
   final String html;
   final Map<String, String> notesById;
@@ -538,27 +540,21 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
     double totalWeight = 0.0;
 
     void addBlock(dom.Element el, String rawXPath) {
-      final tag = el.localName ?? '';
-
-      final normalizedText = _normalizeReaderText(el.text);
-      final textLength = normalizedText.length;
-
-      final imageCount =
-          tag == 'img' ? 1 : el.getElementsByTagName('img').length;
+      final renderable = _buildRenderableBlockContent(el);
 
       final weight = _computeBlockWeight(
-        textLength: textLength,
-        imageCount: imageCount,
+        textLength: renderable.textLength,
+        imageCount: renderable.imageCount,
       );
 
       final clean = XPathUtils.cleanXPath(rawXPath);
 
       final block = _ReaderBlock(
-        html: el.outerHtml,
+        html: renderable.html,
         xPath: rawXPath,
         cleanXPath: clean,
-        textLength: textLength,
-        imageCount: imageCount,
+        textLength: renderable.textLength,
+        imageCount: renderable.imageCount,
         weight: weight,
       );
 
@@ -623,6 +619,86 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
       prefixWeights: prefixWeights,
       totalWeight: totalWeight <= 0 ? 1.0 : totalWeight,
     );
+  }
+
+  ({String html, int textLength, int imageCount}) _buildRenderableBlockContent(
+    dom.Element element,
+  ) {
+    final originalHtml = element.outerHtml;
+    final originalTextLength = _normalizeReaderText(element.text).length;
+    final originalImageCount =
+        element.localName == 'img'
+            ? 1
+            : element.getElementsByTagName('img').length;
+
+    if (!_hasHiddenDescendant(element)) {
+      return (
+        html: originalHtml,
+        textLength: originalTextLength,
+        imageCount: originalImageCount,
+      );
+    }
+
+    try {
+      final fragment = html_parser.parseFragment(originalHtml);
+      for (final root in fragment.nodes.whereType<dom.Element>()) {
+        _removeHiddenElements(root);
+      }
+
+      final roots = fragment.nodes.whereType<dom.Element>().toList();
+      if (roots.isEmpty) {
+        return (
+          html: originalHtml,
+          textLength: originalTextLength,
+          imageCount: originalImageCount,
+        );
+      }
+
+      final root = roots.first;
+      return (
+        html: _serializeFragmentNodes(fragment.nodes),
+        textLength: _normalizeReaderText(root.text).length,
+        imageCount:
+            root.localName == 'img'
+                ? 1
+                : root.getElementsByTagName('img').length,
+      );
+    } catch (_) {
+      return (
+        html: originalHtml,
+        textLength: originalTextLength,
+        imageCount: originalImageCount,
+      );
+    }
+  }
+
+  bool _hasHiddenDescendant(dom.Element element) {
+    for (final child in element.nodes) {
+      if (child is! dom.Element) {
+        continue;
+      }
+      if (_isElementHidden(child) || _hasHiddenDescendant(child)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void _removeHiddenElements(dom.Element element) {
+    final hiddenChildren = <dom.Element>[];
+    for (final child in element.nodes) {
+      if (child is! dom.Element) {
+        continue;
+      }
+      if (_isElementHidden(child)) {
+        hiddenChildren.add(child);
+        continue;
+      }
+      _removeHiddenElements(child);
+    }
+    for (final child in hiddenChildren) {
+      child.remove();
+    }
   }
 
   _ReaderLayoutInfo _analyzeLayoutFromBlocks(List<_ReaderBlock> blocks) {
@@ -1342,6 +1418,7 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
       widget.bid,
       widget.sortNum,
       allowServerOverride: widget.allowServerOverrideOnOpen,
+      openPosition: _ReaderChapterOpenPosition.saved,
     );
     // 开始记录阅读时长
     _readingTimeService.startSession();
@@ -1563,12 +1640,29 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
   }
 
   /// 内容加载后恢复进度
-  Future<void> _restoreScrollPosition() async {
+  Future<void> _restoreScrollPosition(
+    _ReaderChapterOpenPosition openPosition,
+  ) async {
     if (_initialScrollDone) return;
     _initialScrollDone = true;
 
     final result = _blocksResult;
     if (result == null || result.blocks.isEmpty) return;
+
+    if (openPosition == _ReaderChapterOpenPosition.start) {
+      _topVisibleBlockIndex = 0;
+      _lastTopVisibleXPath = result.blocks.first.xPath;
+      await _jumpToBlockIndex(0);
+      return;
+    }
+
+    if (openPosition == _ReaderChapterOpenPosition.end) {
+      final lastIndex = result.blocks.length - 1;
+      _topVisibleBlockIndex = lastIndex;
+      _lastTopVisibleXPath = result.blocks[lastIndex].xPath;
+      await _jumpToBlockIndex(lastIndex, alignment: 1.0);
+      return;
+    }
 
     final position = await _progressService.getLocalPosition(widget.bid);
 
@@ -1604,6 +1698,7 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
     int bid,
     int sortNum, {
     bool allowServerOverride = false,
+    _ReaderChapterOpenPosition openPosition = _ReaderChapterOpenPosition.start,
   }) async {
     _logger.info('Requesting chapter with SortNum: $sortNum...');
 
@@ -1714,7 +1809,12 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
                   _targetSortNum = serverSortNum!;
                 });
                 // 只允许对齐一次，避免递归重定向/覆盖用户后续意图
-                _loadChapter(bid, serverSortNum, allowServerOverride: false);
+                _loadChapter(
+                  bid,
+                  serverSortNum,
+                  allowServerOverride: false,
+                  openPosition: _ReaderChapterOpenPosition.saved,
+                );
               }
               return;
             }
@@ -1783,7 +1883,7 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
           // 最终打断检查
           if (currentVersion != _loadVersion) return;
 
-          await _restoreScrollPosition();
+          await _restoreScrollPosition(openPosition);
 
           // 无论是否恢复进度，都保存当前章节到服务端
           // 确保点击章节进入后即使不滑动也能同步
@@ -1813,7 +1913,11 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
         _targetSortNum--;
       });
       // 手动切章：必须禁用服务端章节覆盖/重定向
-      _loadChapter(widget.bid, _targetSortNum);
+      _loadChapter(
+        widget.bid,
+        _targetSortNum,
+        openPosition: _ReaderChapterOpenPosition.end,
+      );
     } else {
       ScaffoldMessenger.of(
         context,
@@ -1827,7 +1931,11 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
         _targetSortNum++;
       });
       // 手动切章：必须禁用服务端章节覆盖/重定向
-      _loadChapter(widget.bid, _targetSortNum);
+      _loadChapter(
+        widget.bid,
+        _targetSortNum,
+        openPosition: _ReaderChapterOpenPosition.start,
+      );
     } else {
       ScaffoldMessenger.of(
         context,
@@ -2567,6 +2675,55 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
         return normalizeText(el.text).length;
       }
 
+      bool isPreferredNoteContainerTag(String? tag) {
+        const preferredTags = {
+          'li',
+          'p',
+          'div',
+          'section',
+          'aside',
+          'blockquote',
+          'dd',
+        };
+        return preferredTags.contains(tag);
+      }
+
+      dom.Element promoteNoteContainer(dom.Element element) {
+        var container = element;
+        while (true) {
+          final parent = container.parent;
+          if (parent is! dom.Element) {
+            break;
+          }
+
+          final parentTag = parent.localName;
+          final containerTag = container.localName;
+          final containerScore = textScore(container);
+          final parentScore = textScore(parent);
+          final shouldPromote =
+              (!isPreferredNoteContainerTag(containerTag) ||
+                  containerScore <= 2) &&
+              isPreferredNoteContainerTag(parentTag) &&
+              parentScore > containerScore;
+          if (!shouldPromote) {
+            break;
+          }
+          container = parent;
+        }
+        return container;
+      }
+
+      int noteContainerPriority(dom.Element element) {
+        if (isPreferredNoteContainerTag(element.localName)) {
+          return 0;
+        }
+        const inlineAnchorTags = {'a', 'span', 'sup', 'sub'};
+        if (inlineAnchorTags.contains(element.localName)) {
+          return 2;
+        }
+        return 1;
+      }
+
       String? attrValue(dom.Element el, String nameLower) {
         for (final entry in el.attributes.entries) {
           final keyLower = entry.key.toString().toLowerCase();
@@ -2607,34 +2764,41 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
 
         if (candidates.isEmpty) {
           // 最后兜底：保留原 getElementById 行为
-          return doc.getElementById(id);
+          final fallback = doc.getElementById(id);
+          return fallback == null ? null : promoteNoteContainer(fallback);
         }
 
-        dom.Element best = candidates.first;
-        var bestScore = textScore(best);
-        for (final c in candidates.skip(1)) {
-          final score = textScore(c);
-          if (score > bestScore) {
-            best = c;
+        dom.Element? best;
+        var bestScore = -1;
+        var bestPriority = 1 << 30;
+        var bestSize = 1 << 30;
+        final seen = <dom.Element>{};
+        for (final candidate in candidates) {
+          final container = promoteNoteContainer(candidate);
+          if (!seen.add(container)) {
+            continue;
+          }
+
+          final score = textScore(container);
+          final priority = noteContainerPriority(container);
+          final size = container.outerHtml.length;
+          final shouldUse =
+              best == null ||
+              score > bestScore ||
+              (score == bestScore && priority < bestPriority) ||
+              (score == bestScore &&
+                  priority == bestPriority &&
+                  size < bestSize);
+          if (shouldUse) {
+            best = container;
             bestScore = score;
+            bestPriority = priority;
+            bestSize = size;
           }
         }
 
-        // 再兜底一次：如果 best 是纯锚点/标记（例如“到”），但父级包含更多文本，提升到父级（通常是 li）。
-        dom.Element container = best;
-        if (container.localName == 'a') {
-          final parent = container.parent;
-          if (parent is dom.Element) {
-            const allowed = {'li', 'p', 'div', 'span', 'section', 'aside'};
-            final parentScore = textScore(parent);
-            final selfScore = textScore(container);
-            if (allowed.contains(parent.localName) && parentScore > selfScore) {
-              container = parent;
-            }
-          }
-        }
-
-        return container;
+        // Return the promoted container with the most visible note text.
+        return best;
       }
 
       for (final a in doc.querySelectorAll('a.duokan-footnote')) {
@@ -3264,7 +3428,11 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
         setState(() {
           _targetSortNum = sortNum;
         });
-        _loadChapter(widget.bid, sortNum);
+        _loadChapter(
+          widget.bid,
+          sortNum,
+          openPosition: _ReaderChapterOpenPosition.start,
+        );
       },
     );
   }
@@ -3415,7 +3583,11 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
                             setState(() {
                               _targetSortNum = sortNum;
                             });
-                            _loadChapter(widget.bid, sortNum);
+                            _loadChapter(
+                              widget.bid,
+                              sortNum,
+                              openPosition: _ReaderChapterOpenPosition.start,
+                            );
                           }
                         },
                       );
@@ -3468,7 +3640,12 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
           Text(_error ?? '未知错误', textAlign: TextAlign.center),
           const SizedBox(height: 16),
           ElevatedButton.icon(
-            onPressed: () => _loadChapter(widget.bid, _targetSortNum),
+            onPressed:
+                () => _loadChapter(
+                  widget.bid,
+                  _targetSortNum,
+                  openPosition: _ReaderChapterOpenPosition.saved,
+                ),
             icon: const Icon(Icons.refresh),
             label: const Text('重试'),
           ),

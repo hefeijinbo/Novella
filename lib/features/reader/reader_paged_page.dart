@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 import 'package:battery_plus/battery_plus.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 import 'package:novella/core/utils/cover_url_utils.dart';
@@ -24,6 +25,7 @@ import 'package:novella/features/reader/shared/reader_text_sanitizer.dart';
 import 'package:novella/features/reader/shared/reader_title_sheet.dart';
 import 'package:novella/features/reader/shared/reader_title_utils.dart';
 import 'package:novella/features/settings/settings_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _ReaderBlock {
   final String html;
@@ -57,6 +59,8 @@ class _FootnoteProcessingResult {
     required this.notesById,
   });
 }
+
+enum _ReaderChapterOpenPosition { saved, start, end }
 
 class ReaderPagedPage extends ConsumerStatefulWidget {
   final int bid;
@@ -130,9 +134,11 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
   final ValueNotifier<String> _timeStringNotifier = ValueNotifier<String>('');
   static final Map<String, ColorScheme> _schemeCache = {};
   final Map<String, String> _indentedBlockHtmlCache = {};
+  final Map<String, double> _imageAspectRatioCache = {};
   Map<String, String> _footnoteNotesById = const {};
   Timer? _infoTimer;
   StreamSubscription<BatteryState>? _batteryStateSubscription;
+  SharedPreferences? _prefs;
   bool _exitInProgress = false;
   bool _topOverlayVisible = true;
   ChapterContent? _chapter;
@@ -144,6 +150,7 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
   String? _pendingRestoreXPath;
   String _currentXPath = '//*';
   String _lastLayoutKey = '';
+  String _restoredLayoutKey = '';
   String _lastMeasureKey = '';
   Map<int, double> _measuredBlockHeights = const {};
   bool _loading = true;
@@ -158,7 +165,10 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
     _targetSortNum = widget.sortNum;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _initInfoBar();
-    _loadChapter(widget.sortNum);
+    _loadChapter(
+      widget.sortNum,
+      openPosition: _ReaderChapterOpenPosition.saved,
+    );
     _readingTimeService.startSession();
   }
 
@@ -300,7 +310,143 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
     );
   }
 
-  Future<void> _loadChapter(int sortNum) async {
+  Future<SharedPreferences> _ensurePrefs() async {
+    return _prefs ??= await SharedPreferences.getInstance();
+  }
+
+  String _imageAspectRatioPrefsKey(String src) => 'image_ratio_$src';
+
+  Future<void> _cacheImageAspectRatio(String src, double ratio) async {
+    if (!ratio.isFinite || ratio <= 0) {
+      return;
+    }
+    _imageAspectRatioCache[src] = ratio;
+    try {
+      final prefs = await _ensurePrefs();
+      await prefs.setDouble(_imageAspectRatioPrefsKey(src), ratio);
+    } catch (_) {}
+  }
+
+  Future<void> _resolveImageAspectRatio(String src) async {
+    if (src.isEmpty || _imageAspectRatioCache.containsKey(src)) {
+      return;
+    }
+
+    try {
+      final prefs = await _ensurePrefs();
+      final cachedRatio = prefs.getDouble(_imageAspectRatioPrefsKey(src));
+      if (cachedRatio != null && cachedRatio.isFinite && cachedRatio > 0) {
+        _imageAspectRatioCache[src] = cachedRatio;
+        return;
+      }
+    } catch (_) {}
+
+    if (!mounted) {
+      return;
+    }
+
+    final completer = Completer<void>();
+    final imageProvider = CachedNetworkImageProvider(src);
+    final stream = imageProvider.resolve(const ImageConfiguration());
+    late final ImageStreamListener listener;
+    listener = ImageStreamListener(
+      (info, _) {
+        final width = info.image.width.toDouble();
+        final height = info.image.height.toDouble();
+        if (height > 0) {
+          unawaited(_cacheImageAspectRatio(src, width / height));
+        }
+        if (!completer.isCompleted) {
+          completer.complete();
+        }
+        stream.removeListener(listener);
+      },
+      onError: (_, __) {
+        if (!completer.isCompleted) {
+          completer.complete();
+        }
+        stream.removeListener(listener);
+      },
+    );
+    stream.addListener(listener);
+
+    try {
+      await completer.future.timeout(const Duration(seconds: 8));
+    } on TimeoutException {
+      stream.removeListener(listener);
+    }
+  }
+
+  Future<void> _primeImageAspectRatios(String html) async {
+    if (html.isEmpty) {
+      return;
+    }
+
+    final fragment = html_parser.parseFragment(html);
+    final pending = <Future<void>>[];
+    final seen = <String>{};
+    for (final image in fragment.querySelectorAll('img')) {
+      if (_isFootnoteMarkerImage(image)) {
+        continue;
+      }
+
+      final src = image.attributes['src']?.trim();
+      if (src == null || src.isEmpty || !seen.add(src)) {
+        continue;
+      }
+
+      final explicitRatio = _imageAspectRatio(
+        _parseDimension(image.attributes['width']),
+        _parseDimension(image.attributes['height']),
+      );
+      if (explicitRatio != null) {
+        pending.add(_cacheImageAspectRatio(src, explicitRatio));
+        continue;
+      }
+
+      if (_imageAspectRatioCache.containsKey(src)) {
+        continue;
+      }
+
+      pending.add(_resolveImageAspectRatio(src));
+    }
+
+    if (pending.isEmpty) {
+      return;
+    }
+
+    await Future.wait(pending);
+  }
+
+  String _resolveInitialRestoreXPath(
+    _ReaderChapterOpenPosition openPosition,
+    List<_ReaderBlock> blocks,
+    ReadPosition? localPosition,
+    int sortNum,
+  ) {
+    if (blocks.isEmpty) {
+      return '//*';
+    }
+
+    switch (openPosition) {
+      case _ReaderChapterOpenPosition.end:
+        return blocks.last.xPath;
+      case _ReaderChapterOpenPosition.start:
+        return blocks.first.xPath;
+      case _ReaderChapterOpenPosition.saved:
+        if (localPosition != null &&
+            localPosition.sortNum == sortNum &&
+            localPosition.xPath.isNotEmpty) {
+          return localPosition.xPath;
+        }
+        return blocks.first.xPath;
+    }
+  }
+
+  Future<void> _loadChapter(
+    int sortNum, {
+    _ReaderChapterOpenPosition openPosition = _ReaderChapterOpenPosition.start,
+  }) async {
     final version = ++_loadVersion;
     _FootnoteAnchor.dismissCurrent();
     if (_chapter != null) unawaited(_saveCurrentPosition());
@@ -311,6 +457,7 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
       _currentPage = 0;
       _currentXPath = '//*';
       _lastLayoutKey = '';
+      _restoredLayoutKey = '';
       _lastMeasureKey = '';
       _measuredBlockHeights = const {};
       _footnoteNotesById = const {};
@@ -340,9 +487,17 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
         invisibleCodepoints,
       );
       final processed = _processFootnotes(sanitizedContent);
+      await _primeImageAspectRatios(processed.html);
+      if (version != _loadVersion) return;
       final blocks = _buildBlocks(processed.html);
       final localPosition = await _progressService.getLocalPosition(widget.bid);
       if (!mounted || version != _loadVersion) return;
+      final initialRestoreXPath = _resolveInitialRestoreXPath(
+        openPosition,
+        blocks.$1,
+        localPosition,
+        sortNum,
+      );
       setState(() {
         _chapter = chapter;
         _fontFamily = fontFamily;
@@ -353,10 +508,7 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
         _loading = false;
         _targetSortNum = sortNum;
         _currentXPath = _blocks.isEmpty ? '//*' : _blocks.first.xPath;
-        _pendingRestoreXPath =
-            localPosition != null && localPosition.sortNum == chapter.sortNum
-                ? localPosition.xPath
-                : _currentXPath;
+        _pendingRestoreXPath = initialRestoreXPath;
       });
     } catch (e) {
       if (!mounted || version != _loadVersion) return;
@@ -372,19 +524,15 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
     final indexByXPath = <String, int>{};
     void add(dom.Element element, String rawXPath) {
       final cleanXPath = XPathUtils.cleanXPath(rawXPath);
-      final textLength = _normalizeText(element.text).length;
-      final imageCount =
-          element.localName == 'img'
-              ? 1
-              : element.getElementsByTagName('img').length;
+      final renderable = _buildRenderableBlockContent(element);
       indexByXPath.putIfAbsent(cleanXPath, () => blocks.length);
       blocks.add(
         _ReaderBlock(
-          element.outerHtml,
+          renderable.html,
           rawXPath,
           cleanXPath,
-          textLength,
-          imageCount,
+          renderable.textLength,
+          renderable.imageCount,
         ),
       );
     }
@@ -424,6 +572,91 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
     return (blocks, indexByXPath);
   }
 
+  ({String html, int textLength, int imageCount}) _buildRenderableBlockContent(
+    dom.Element element,
+  ) {
+    final originalHtml = element.outerHtml;
+    final originalTextLength = _normalizeText(element.text).length;
+    final originalImageCount =
+        element.localName == 'img'
+            ? 1
+            : element.getElementsByTagName('img').length;
+
+    if (!_hasHiddenDescendant(element)) {
+      return (
+        html: originalHtml,
+        textLength: originalTextLength,
+        imageCount: originalImageCount,
+      );
+    }
+
+    try {
+      final fragment = html_parser.parseFragment(originalHtml);
+      for (final root in fragment.nodes.whereType<dom.Element>()) {
+        _removeHiddenElements(root);
+      }
+
+      final roots = fragment.nodes.whereType<dom.Element>().toList();
+      if (roots.isEmpty) {
+        return (
+          html: originalHtml,
+          textLength: originalTextLength,
+          imageCount: originalImageCount,
+        );
+      }
+
+      final root = roots.first;
+      return (
+        html: _serializeFragmentNodes(fragment.nodes),
+        textLength: _normalizeText(root.text).length,
+        imageCount:
+            root.localName == 'img'
+                ? 1
+                : root.getElementsByTagName('img').length,
+      );
+    } catch (_) {
+      return (
+        html: originalHtml,
+        textLength: originalTextLength,
+        imageCount: originalImageCount,
+      );
+    }
+  }
+
+  bool _hasHiddenDescendant(dom.Element element) {
+    for (final child in element.nodes) {
+      if (child is! dom.Element) {
+        continue;
+      }
+      if (_isElementHidden(child) || _hasHiddenDescendant(child)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void _removeHiddenElements(dom.Element element) {
+    final hiddenChildren = <dom.Element>[];
+    for (final child in element.nodes) {
+      if (child is! dom.Element) {
+        continue;
+      }
+      if (_isElementHidden(child)) {
+        hiddenChildren.add(child);
+        continue;
+      }
+      _removeHiddenElements(child);
+    }
+    for (final child in hiddenChildren) {
+      child.remove();
+    }
+  }
+
+  bool _isElementHidden(dom.Element element) {
+    final style = (element.attributes['style'] ?? '').toLowerCase();
+    return RegExp(r'display\s*:\s*none').hasMatch(style);
+  }
+
   _FootnoteProcessingResult _processFootnotes(String html) {
     if (html.isEmpty) {
       return const _FootnoteProcessingResult(html: '', notesById: {});
@@ -455,6 +688,55 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
         return _normalizeText(element.text).length;
       }
 
+      bool isPreferredNoteContainerTag(String? tag) {
+        const preferredTags = {
+          'li',
+          'p',
+          'div',
+          'section',
+          'aside',
+          'blockquote',
+          'dd',
+        };
+        return preferredTags.contains(tag);
+      }
+
+      dom.Element promoteNoteContainer(dom.Element element) {
+        var container = element;
+        while (true) {
+          final parent = container.parent;
+          if (parent is! dom.Element) {
+            break;
+          }
+
+          final parentTag = parent.localName;
+          final containerTag = container.localName;
+          final containerScore = textScore(container);
+          final parentScore = textScore(parent);
+          final shouldPromote =
+              (!isPreferredNoteContainerTag(containerTag) ||
+                  containerScore <= 2) &&
+              isPreferredNoteContainerTag(parentTag) &&
+              parentScore > containerScore;
+          if (!shouldPromote) {
+            break;
+          }
+          container = parent;
+        }
+        return container;
+      }
+
+      int noteContainerPriority(dom.Element element) {
+        if (isPreferredNoteContainerTag(element.localName)) {
+          return 0;
+        }
+        const inlineAnchorTags = {'a', 'span', 'sup', 'sub'};
+        if (inlineAnchorTags.contains(element.localName)) {
+          return 2;
+        }
+        return 1;
+      }
+
       final idIndex = <String, List<dom.Element>>{};
       final nameIndex = <String, List<dom.Element>>{};
       final root = doc.documentElement ?? doc;
@@ -475,27 +757,36 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
           ...(nameIndex[id] ?? const <dom.Element>[]),
         ];
         if (candidates.isEmpty) {
-          return doc.getElementById(id);
+          final fallback = doc.getElementById(id);
+          return fallback == null ? null : promoteNoteContainer(fallback);
         }
 
-        var best = candidates.first;
-        var bestScore = textScore(best);
-        for (final candidate in candidates.skip(1)) {
-          final candidateScore = textScore(candidate);
-          if (candidateScore > bestScore) {
-            best = candidate;
-            bestScore = candidateScore;
+        dom.Element? best;
+        var bestScore = -1;
+        var bestPriority = 1 << 30;
+        var bestSize = 1 << 30;
+        final seen = <dom.Element>{};
+        for (final candidate in candidates) {
+          final container = promoteNoteContainer(candidate);
+          if (!seen.add(container)) {
+            continue;
           }
-        }
 
-        if (best.localName == 'a') {
-          final parent = best.parent;
-          if (parent is dom.Element) {
-            const allowed = {'li', 'p', 'div', 'span', 'section', 'aside'};
-            if (allowed.contains(parent.localName) &&
-                textScore(parent) > textScore(best)) {
-              best = parent;
-            }
+          final candidateScore = textScore(container);
+          final priority = noteContainerPriority(container);
+          final size = container.outerHtml.length;
+          final shouldUse =
+              best == null ||
+              candidateScore > bestScore ||
+              (candidateScore == bestScore && priority < bestPriority) ||
+              (candidateScore == bestScore &&
+                  priority == bestPriority &&
+                  size < bestSize);
+          if (shouldUse) {
+            best = container;
+            bestScore = candidateScore;
+            bestPriority = priority;
+            bestSize = size;
           }
         }
 
@@ -678,8 +969,7 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
   bool _shouldUseAsBlock(dom.Element element) {
     final tag = element.localName ?? '';
     if (!_blockTags.contains(tag)) return false;
-    final style = (element.attributes['style'] ?? '').toLowerCase();
-    if (style.contains('display:none') || style.contains('display: none')) {
+    if (_isElementHidden(element)) {
       return false;
     }
     if (tag == 'img' || tag == 'hr' || tag == 'table') return true;
@@ -869,6 +1159,23 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
     return width / height;
   }
 
+  double? _resolvedImageAspectRatio(dom.Element element) {
+    final explicitRatio = _imageAspectRatio(
+      _parseDimension(element.attributes['width']),
+      _parseDimension(element.attributes['height']),
+    );
+    if (explicitRatio != null) {
+      return explicitRatio;
+    }
+
+    final src = element.attributes['src']?.trim();
+    if (src == null || src.isEmpty) {
+      return null;
+    }
+
+    return _imageAspectRatioCache[src];
+  }
+
   Widget? _buildIllustrationContainerWidget(
     dom.Element element,
     Color textColor,
@@ -892,10 +1199,7 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
       return null;
     }
 
-    final aspectRatio = _imageAspectRatio(
-      _parseDimension(image.attributes['width']),
-      _parseDimension(image.attributes['height']),
-    );
+    final aspectRatio = _resolvedImageAspectRatio(image);
     final fullWidth = _hasFullWidthStyle(element) || _hasFullWidthStyle(image);
     final previewable = _isPreviewableReaderImage(image);
     final alt = image.attributes['alt'];
@@ -944,7 +1248,7 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
     final alt = element.attributes['alt'];
     final width = _parseDimension(element.attributes['width']);
     final height = _parseDimension(element.attributes['height']);
-    final aspectRatio = _imageAspectRatio(width, height);
+    final aspectRatio = _resolvedImageAspectRatio(element);
     final parentTag = element.parent?.localName;
     final insideTable = _isInsideTableStructure(element);
     final insideIllustration = _isInsideIllustrationContainer(element);
@@ -952,6 +1256,20 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
     final isPreviewable = _isPreviewableReaderImage(element);
 
     if (floating.isFloating) {
+      Widget child = ReaderRoundedNetworkImage(
+        imageUrl: src,
+        alt: alt,
+        width: width,
+        height: height,
+        errorColor: textColor,
+        borderRadius: 4,
+        previewable: isPreviewable,
+      );
+
+      if (aspectRatio != null) {
+        child = AspectRatio(aspectRatio: aspectRatio, child: child);
+      }
+
       return Align(
         alignment:
             floating.isFloatRight
@@ -959,15 +1277,7 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
                 : Alignment.centerLeft,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 160),
-          child: ReaderRoundedNetworkImage(
-            imageUrl: src,
-            alt: alt,
-            width: width,
-            height: height,
-            errorColor: textColor,
-            borderRadius: 4,
-            previewable: isPreviewable,
-          ),
+          child: child,
         ),
       );
     }
@@ -1591,19 +1901,18 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
     }
   }
 
-  void _scheduleRestore(
-    List<_ReaderPageSlice> pages,
-    BoxConstraints constraints,
-    AppSettings settings,
-  ) {
-    final layoutKey =
-        '${_chapter?.id}|${constraints.maxWidth.toStringAsFixed(1)}|${constraints.maxHeight.toStringAsFixed(1)}|'
-        '${settings.fontSize.toStringAsFixed(2)}|${settings.readerLineHeight.toStringAsFixed(2)}|'
-        '${settings.readerFirstLineIndent}|${pages.length}';
+  void _scheduleRestore(List<_ReaderPageSlice> pages, String layoutKey) {
     if (_lastLayoutKey == layoutKey) return;
     _lastLayoutKey = layoutKey;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted || !_pageController.hasClients || pages.isEmpty) return;
+      if (!mounted || pages.isEmpty) return;
+      if (!_pageController.hasClients) {
+        if (!mounted) return;
+        setState(() {
+          _lastLayoutKey = '';
+        });
+        return;
+      }
       var targetPage = _currentPage.clamp(0, pages.length - 1);
       if (_pendingRestoreXPath != null && _pendingRestoreXPath!.isNotEmpty) {
         final blockIndex = _resolveBlockIndex(_pendingRestoreXPath!);
@@ -1619,6 +1928,7 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
         _currentPage = targetPage;
         _currentXPath = xPath;
         _pendingRestoreXPath = null;
+        _restoredLayoutKey = layoutKey;
       });
       await _saveCurrentPosition(xPath: xPath);
     });
@@ -1703,7 +2013,7 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
           return;
         }
         _FootnoteAnchor.dismissCurrent();
-        _loadChapter(sortNum);
+        _loadChapter(sortNum, openPosition: _ReaderChapterOpenPosition.start);
       },
     );
   }
@@ -1736,7 +2046,10 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
                 if (sortNum == _targetSortNum) {
                   return;
                 }
-                _loadChapter(sortNum);
+                _loadChapter(
+                  sortNum,
+                  openPosition: _ReaderChapterOpenPosition.start,
+                );
               },
             );
           },
@@ -2301,8 +2614,24 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
                                         settings,
                                       )
                                       : const <_ReaderPageSlice>[];
+                              final pageSignature = pages
+                                  .map(
+                                    (page) =>
+                                        '${page.start}-${page.end}:${page.xPath}',
+                                  )
+                                  .join('|');
+                              final layoutKey =
+                                  '${_chapter?.id}|${constraints.maxWidth.toStringAsFixed(1)}|'
+                                  '${constraints.maxHeight.toStringAsFixed(1)}|'
+                                  '${settings.fontSize.toStringAsFixed(2)}|'
+                                  '${settings.readerLineHeight.toStringAsFixed(2)}|'
+                                  '${settings.readerFirstLineIndent}|$pageSignature';
+                              final pageDisplayReady =
+                                  measurementReady &&
+                                  pages.isNotEmpty &&
+                                  _restoredLayoutKey == layoutKey;
                               if (measurementReady && pages.isNotEmpty) {
-                                _scheduleRestore(pages, constraints, settings);
+                                _scheduleRestore(pages, layoutKey);
                               }
                               return Stack(
                                 children: [
@@ -2313,99 +2642,126 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
                                     textColor: textColor,
                                     linkColor: linkColor,
                                   ),
-                                  if (!measurementReady || pages.isEmpty)
-                                    const Center(child: M3ELoadingIndicator())
-                                  else
-                                    PageView.builder(
-                                      controller: _pageController,
-                                      itemCount: pages.length,
-                                      onPageChanged: (index) {
-                                        _FootnoteAnchor.dismissCurrent();
-                                        final xPath = pages[index].xPath;
-                                        setState(() {
-                                          _currentPage = index;
-                                          _currentXPath = xPath;
-                                        });
-                                        unawaited(
-                                          _saveCurrentPosition(xPath: xPath),
-                                        );
-                                      },
-                                      itemBuilder: (context, index) {
-                                        final page = pages[index];
-                                        final imageOnly = _isImageOnlyPage(
-                                          page,
-                                        );
-                                        final imageUrl =
-                                            _extractPrimaryImageSrc(page);
-                                        return GestureDetector(
-                                          behavior: HitTestBehavior.opaque,
-                                          onTapUp: (details) {
-                                            final dx = details.localPosition.dx;
-                                            if (dx <=
-                                                constraints.maxWidth * 0.35) {
-                                              if (_currentPage > 0) {
-                                                _pageController.previousPage(
-                                                  duration: const Duration(
-                                                    milliseconds: 220,
-                                                  ),
-                                                  curve: Curves.easeOutCubic,
-                                                );
-                                              } else if (_targetSortNum > 1) {
-                                                _FootnoteAnchor.dismissCurrent();
-                                                _loadChapter(
-                                                  _targetSortNum - 1,
-                                                );
-                                              }
-                                            } else if (dx >=
-                                                constraints.maxWidth * 0.65) {
-                                              if (_currentPage <
-                                                  pages.length - 1) {
-                                                _pageController.nextPage(
-                                                  duration: const Duration(
-                                                    milliseconds: 220,
-                                                  ),
-                                                  curve: Curves.easeOutCubic,
-                                                );
-                                              } else if (_targetSortNum <
-                                                  widget.totalChapters) {
-                                                _FootnoteAnchor.dismissCurrent();
-                                                _loadChapter(
-                                                  _targetSortNum + 1,
-                                                );
-                                              }
-                                            }
-                                          },
-                                          child: Padding(
-                                            padding: EdgeInsets.fromLTRB(
-                                              horizontalPadding,
-                                              contentTopPadding,
-                                              horizontalPadding,
-                                              contentBottomPadding,
-                                            ),
-                                            child:
-                                                imageOnly && imageUrl != null
-                                                    ? _buildImageOnlyPage(
-                                                      page: page,
-                                                      imageUrl: imageUrl,
-                                                      width: contentWidth,
-                                                      maxHeight: contentHeight,
-                                                      settings: settings,
-                                                      textColor: textColor,
-                                                      linkColor: linkColor,
-                                                    )
-                                                    : _buildHtmlPage(
-                                                      page: page,
-                                                      width: contentWidth,
-                                                      maxHeight: contentHeight,
-                                                      settings: settings,
-                                                      textColor: textColor,
-                                                      linkColor: linkColor,
-                                                    ),
-                                          ),
-                                        );
-                                      },
-                                    ),
                                   if (measurementReady && pages.isNotEmpty)
+                                    IgnorePointer(
+                                      ignoring: !pageDisplayReady,
+                                      child: Opacity(
+                                        opacity: pageDisplayReady ? 1 : 0,
+                                        child: PageView.builder(
+                                          controller: _pageController,
+                                          itemCount: pages.length,
+                                          onPageChanged: (index) {
+                                            _FootnoteAnchor.dismissCurrent();
+                                            final xPath = pages[index].xPath;
+                                            setState(() {
+                                              _currentPage = index;
+                                              _currentXPath = xPath;
+                                            });
+                                            unawaited(
+                                              _saveCurrentPosition(
+                                                xPath: xPath,
+                                              ),
+                                            );
+                                          },
+                                          itemBuilder: (context, index) {
+                                            final page = pages[index];
+                                            final imageOnly = _isImageOnlyPage(
+                                              page,
+                                            );
+                                            final imageUrl =
+                                                _extractPrimaryImageSrc(page);
+                                            return GestureDetector(
+                                              behavior: HitTestBehavior.opaque,
+                                              onTapUp: (details) {
+                                                final dx =
+                                                    details.localPosition.dx;
+                                                if (dx <=
+                                                    constraints.maxWidth *
+                                                        0.35) {
+                                                  if (_currentPage > 0) {
+                                                    _pageController
+                                                        .previousPage(
+                                                          duration:
+                                                              const Duration(
+                                                                milliseconds:
+                                                                    220,
+                                                              ),
+                                                          curve:
+                                                              Curves
+                                                                  .easeOutCubic,
+                                                        );
+                                                  } else if (_targetSortNum >
+                                                      1) {
+                                                    _FootnoteAnchor.dismissCurrent();
+                                                    _loadChapter(
+                                                      _targetSortNum - 1,
+                                                      openPosition:
+                                                          _ReaderChapterOpenPosition
+                                                              .end,
+                                                    );
+                                                  }
+                                                } else if (dx >=
+                                                    constraints.maxWidth *
+                                                        0.65) {
+                                                  if (_currentPage <
+                                                      pages.length - 1) {
+                                                    _pageController.nextPage(
+                                                      duration: const Duration(
+                                                        milliseconds: 220,
+                                                      ),
+                                                      curve:
+                                                          Curves.easeOutCubic,
+                                                    );
+                                                  } else if (_targetSortNum <
+                                                      widget.totalChapters) {
+                                                    _FootnoteAnchor.dismissCurrent();
+                                                    _loadChapter(
+                                                      _targetSortNum + 1,
+                                                      openPosition:
+                                                          _ReaderChapterOpenPosition
+                                                              .start,
+                                                    );
+                                                  }
+                                                }
+                                              },
+                                              child: Padding(
+                                                padding: EdgeInsets.fromLTRB(
+                                                  horizontalPadding,
+                                                  contentTopPadding,
+                                                  horizontalPadding,
+                                                  contentBottomPadding,
+                                                ),
+                                                child:
+                                                    imageOnly &&
+                                                            imageUrl != null
+                                                        ? _buildImageOnlyPage(
+                                                          page: page,
+                                                          imageUrl: imageUrl,
+                                                          width: contentWidth,
+                                                          maxHeight:
+                                                              contentHeight,
+                                                          settings: settings,
+                                                          textColor: textColor,
+                                                          linkColor: linkColor,
+                                                        )
+                                                        : _buildHtmlPage(
+                                                          page: page,
+                                                          width: contentWidth,
+                                                          maxHeight:
+                                                              contentHeight,
+                                                          settings: settings,
+                                                          textColor: textColor,
+                                                          linkColor: linkColor,
+                                                        ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    ),
+                                  if (!pageDisplayReady)
+                                    const Center(child: M3ELoadingIndicator()),
+                                  if (pageDisplayReady)
                                     Positioned(
                                       left: 16,
                                       right: 16,
