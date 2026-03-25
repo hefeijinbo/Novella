@@ -19,7 +19,6 @@ Future<void> main() async {
   final siteData = await const SiteDataLoader().load();
   final pageTitle = 'Novella — Open Source Light Novel Reader';
   final description = siteData.repository.description;
-  final releaseUrl = siteData.latestRelease.url;
   final heroImageUrl = _resolveAssetUrl(
     canonicalUrl,
     'assets/screenshots/OG.png',
@@ -123,7 +122,7 @@ Future<void> main() async {
           attributes: {'name': 'theme-color', 'content': '#080b12'},
         ),
       ],
-      body: App(siteData: siteData, releaseUrl: releaseUrl),
+      body: App(siteData: siteData),
     ),
   );
 }

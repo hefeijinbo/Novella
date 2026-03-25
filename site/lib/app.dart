@@ -5,10 +5,9 @@ import 'src/components/landing_page.dart';
 import 'src/content/models.dart';
 
 class App extends StatelessComponent {
-  const App({required this.siteData, required this.releaseUrl, super.key});
+  const App({required this.siteData, super.key});
 
   final SiteData siteData;
-  final String releaseUrl;
 
   Component _buildNotFoundDocument() {
     return Component.fragment([
@@ -32,8 +31,7 @@ class App extends StatelessComponent {
             changeFreq: ChangeFreq.daily,
             priority: 1.0,
           ),
-          builder: (context, _) =>
-              HomePage(siteData: siteData, releaseUrl: releaseUrl),
+          builder: (context, _) => HomePage(siteData: siteData),
         ),
         Route(
           path: '/download',

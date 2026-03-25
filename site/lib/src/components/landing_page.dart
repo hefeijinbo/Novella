@@ -21,10 +21,9 @@ const _githubSvg =
 // ━━━ 页面组件 ━━━
 
 class HomePage extends StatelessComponent {
-  const HomePage({required this.siteData, required this.releaseUrl, super.key});
+  const HomePage({required this.siteData, super.key});
 
   final SiteData siteData;
-  final String releaseUrl;
 
   @override
   Component build(BuildContext context) {
@@ -34,7 +33,7 @@ class HomePage extends StatelessComponent {
       currentPath: '/',
       siteData: siteData,
       children: [
-        _buildHomeHero(siteData, releaseUrl, featured),
+        _buildHomeHero(siteData, featured),
         _buildFeatureStrip(),
         _buildContributorsSection(siteData),
       ],
@@ -254,11 +253,7 @@ Component _buildHeader(String currentPath, SiteData siteData) {
 
 // ━━━ 首页 Hero ━━━
 
-Component _buildHomeHero(
-  SiteData siteData,
-  String releaseUrl,
-  List<ReleaseAsset> featured,
-) {
+Component _buildHomeHero(SiteData siteData, List<ReleaseAsset> featured) {
   final platforms = _homePlatforms(featured);
 
   return _el(
@@ -358,30 +353,6 @@ Component _buildHomeHero(
                 'div',
                 attrs: {'class': 'flex flex-wrap items-center gap-4 mt-6'},
                 children: [
-                  _el(
-                    'div',
-                    attrs: {
-                      'class':
-                          'flex items-center gap-3 px-4 h-12 '
-                          'rounded-xl border border-base-content/10 '
-                          'bg-base-200/50',
-                    },
-                    children: [
-                      _el(
-                        'span',
-                        attrs: {
-                          'class':
-                              'text-xs text-base-content/50 '
-                              'tracking-widest uppercase',
-                        },
-                        children: [_text('LATEST')],
-                      ),
-                      _el(
-                        'strong',
-                        children: [_text(siteData.latestRelease.tagName)],
-                      ),
-                    ],
-                  ),
                   _el(
                     'a',
                     attrs: {
@@ -725,10 +696,9 @@ Component _buildDownloadSection(
               'div',
               attrs: {'class': 'card-body p-6'},
               children: [
-                _pill(siteData.latestRelease.tagName),
                 _el(
                   'h3',
-                  attrs: {'class': 'font-bold text-xl mt-3 mb-2'},
+                  attrs: {'class': 'font-bold text-xl mb-2'},
                   children: [_text(siteData.latestRelease.name)],
                 ),
                 _el(
@@ -887,10 +857,9 @@ Component _buildReleaseSection(SiteData siteData) {
                 _el(
                   'div',
                   children: [
-                    _pill(siteData.latestRelease.tagName),
                     _el(
                       'h3',
-                      attrs: {'class': 'font-bold text-lg mt-2'},
+                      attrs: {'class': 'font-bold text-lg'},
                       children: [_text(siteData.latestRelease.name)],
                     ),
                   ],
