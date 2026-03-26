@@ -11,6 +11,8 @@ class SettingsUIHelper {
     required Map<T, String> options,
     required Map<T, IconData> icons,
     required ValueChanged<T> onSelected,
+    Widget Function(BuildContext context, T value, bool isSelected)?
+    leadingBuilder,
   }) {
     showModalBottomSheet(
       context: context,
@@ -49,13 +51,16 @@ class SettingsUIHelper {
               ...options.entries.map((entry) {
                 final isSelected = entry.key == currentValue;
                 return ListTile(
-                  leading: Icon(
-                    icons[entry.key],
-                    color:
-                        isSelected
-                            ? colorScheme.primary
-                            : colorScheme.onSurfaceVariant,
-                  ),
+                  leading:
+                      leadingBuilder != null
+                          ? leadingBuilder(context, entry.key, isSelected)
+                          : Icon(
+                            icons[entry.key],
+                            color:
+                                isSelected
+                                    ? colorScheme.primary
+                                    : colorScheme.onSurfaceVariant,
+                          ),
                   title: Text(
                     entry.value,
                     style: TextStyle(

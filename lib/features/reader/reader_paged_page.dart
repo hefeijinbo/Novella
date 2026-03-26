@@ -14,12 +14,14 @@ import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 import 'package:novella/core/utils/cover_url_utils.dart';
 import 'package:novella/core/utils/font_manager.dart';
+import 'package:novella/core/utils/time_utils.dart';
 import 'package:novella/core/utils/xpath_utils.dart';
 import 'package:novella/core/widgets/m3e_loading_indicator.dart';
 import 'package:novella/data/services/chapter_service.dart';
 import 'package:novella/data/services/reading_progress_service.dart';
 import 'package:novella/data/services/reading_time_service.dart';
 import 'package:novella/features/reader/reader_background_page.dart';
+import 'package:novella/features/reader/shared/reader_battery_indicator.dart';
 import 'package:novella/features/reader/shared/reader_chapter_sheet.dart';
 import 'package:novella/features/reader/shared/reader_image_view.dart';
 import 'package:novella/features/reader/shared/reader_text_sanitizer.dart';
@@ -205,13 +207,9 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
 
   void _updateTime() {
     final now = DateTime.now();
-    final hour = now.hour;
-    final minute = now.minute.toString().padLeft(2, '0');
-    final period = hour < 12 ? '上午' : '下午';
-    final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
 
     if (!mounted) return;
-    _timeStringNotifier.value = '$period $displayHour:$minute';
+    _timeStringNotifier.value = TimeUtils.formatChineseDayPeriodTime(now);
   }
 
   Future<void> _updateBattery() async {
@@ -2514,7 +2512,11 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
     );
   }
 
-  Widget _buildBottomInfoStrip(BuildContext context, Color textColor) {
+  Widget _buildBottomInfoStrip(
+    BuildContext context,
+    AppSettings settings,
+    Color textColor,
+  ) {
     final subTextColor = textColor.withValues(alpha: 0.65);
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -2534,49 +2536,14 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
           },
         ),
         const SizedBox(width: 8),
-        AnimatedBuilder(
-          animation: Listenable.merge([
-            _batteryLevelNotifier,
-            _batteryStateNotifier,
-          ]),
-          builder: (context, _) {
-            final batteryLevel = _batteryLevelNotifier.value;
-            final batteryState = _batteryStateNotifier.value;
-            final widthFactor = (batteryLevel / 100.0).clamp(0.0, 1.0);
-
-            final barColor = () {
-              if (batteryState == BatteryState.charging) {
-                return Colors.blue;
-              }
-              if (batteryLevel <= 15) {
-                return Colors.red;
-              }
-              if (batteryLevel <= 35) {
-                return Colors.yellow;
-              }
-              return const Color(0xFF34C759);
-            }();
-
-            return Container(
-              width: 36,
-              height: 6,
-              decoration: BoxDecoration(
-                color: subTextColor.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(3),
-              ),
-              alignment: Alignment.centerLeft,
-              child: FractionallySizedBox(
-                widthFactor: widthFactor,
-                heightFactor: 1.0,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: barColor,
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                ),
-              ),
-            );
-          },
+        ReaderBatteryIndicator(
+          batteryLevelListenable: _batteryLevelNotifier,
+          batteryStateListenable: _batteryStateNotifier,
+          style: settings.effectiveReaderBatteryIndicatorStyle,
+          color: subTextColor,
+          textStyle: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: subTextColor, fontSize: 11),
         ),
       ],
     );
@@ -2907,6 +2874,7 @@ class _ReaderPagedPageState extends ConsumerState<ReaderPagedPage>
                                       child: IgnorePointer(
                                         child: _buildBottomInfoStrip(
                                           context,
+                                          settings,
                                           textColor,
                                         ),
                                       ),

@@ -9,11 +9,19 @@ const _readerViewModeLabels = {
   ReaderViewMode.scroll: '滑动翻页',
 };
 
-const _convertTypeLabels = {
-  'none': '关闭',
-  't2s': '繁转简',
-  's2t': '简转繁',
+const _readerBatteryIndicatorLabels = {
+  ReaderBatteryIndicatorStyle.capsule: '标准胶囊',
+  ReaderBatteryIndicatorStyle.capsuleDynamic: '动态胶囊',
+  ReaderBatteryIndicatorStyle.text: '文字',
 };
+
+const _readerBatteryIndicatorIcons = {
+  ReaderBatteryIndicatorStyle.capsule: Icons.adjust,
+  ReaderBatteryIndicatorStyle.capsuleDynamic: Icons.adjust,
+  ReaderBatteryIndicatorStyle.text: Icons.text_fields,
+};
+
+const _convertTypeLabels = {'none': '关闭', 't2s': '繁转简', 's2t': '简转繁'};
 
 const _cleanChapterTitleScopeLabels = {
   AppSettings.cleanChapterTitleContinueReadingScope: '续读按钮',
@@ -139,6 +147,37 @@ class ReadingSettingsPage extends ConsumerWidget {
                     ),
               ),
               ListTile(
+                leading: const Icon(Icons.bolt_rounded),
+                title: const Text('电量指示器'),
+                subtitle: Text(_getReaderBatteryIndicatorSummary(settings)),
+                trailing: const Icon(Icons.chevron_right, size: 20),
+                onTap:
+                    () => SettingsUIHelper.showSelectionSheet<
+                      ReaderBatteryIndicatorStyle
+                    >(
+                      context: context,
+                      title: '电量指示器',
+                      subtitle:
+                          settings.supportsTextBatteryIndicator
+                              ? '可在文字、标准胶囊和动态胶囊之间切换'
+                              : '此平台仅支持胶囊样式，可在标准胶囊和动态胶囊之间切换',
+                      currentValue:
+                          settings.effectiveReaderBatteryIndicatorStyle,
+                      options: _availableReaderBatteryIndicatorOptions(
+                        settings,
+                      ),
+                      icons: _readerBatteryIndicatorIcons,
+                      onSelected: notifier.setReaderBatteryIndicatorStyle,
+                      leadingBuilder:
+                          (context, value, isSelected) =>
+                              _buildReaderBatteryIndicatorOptionIcon(
+                                context,
+                                value,
+                                isSelected,
+                              ),
+                    ),
+              ),
+              ListTile(
                 leading: const Icon(Icons.auto_fix_high),
                 title: const Text('简化章节标题'),
                 subtitle: Text(_getCleanChapterTitleScopeSummary(settings)),
@@ -154,10 +193,9 @@ class ReadingSettingsPage extends ConsumerWidget {
   }
 
   String _getCleanChapterTitleScopeSummary(AppSettings settings) {
-    final enabledScopes =
-        _cleanChapterTitleScopes
-            .where(settings.isCleanChapterTitleEnabled)
-            .toList(growable: false);
+    final enabledScopes = _cleanChapterTitleScopes
+        .where(settings.isCleanChapterTitleEnabled)
+        .toList(growable: false);
     if (enabledScopes.isEmpty) {
       return '关闭';
     }
@@ -168,6 +206,49 @@ class ReadingSettingsPage extends ConsumerWidget {
       return _cleanChapterTitleScopeLabels[enabledScopes.first] ?? '关闭';
     }
     return '${enabledScopes.length} 个作用域';
+  }
+
+  String _getReaderBatteryIndicatorSummary(AppSettings settings) {
+    final label =
+        _readerBatteryIndicatorLabels[settings
+            .effectiveReaderBatteryIndicatorStyle] ??
+        '标准色胶囊';
+    return label;
+  }
+
+  Map<ReaderBatteryIndicatorStyle, String>
+  _availableReaderBatteryIndicatorOptions(AppSettings settings) {
+    if (settings.supportsTextBatteryIndicator) {
+      return _readerBatteryIndicatorLabels;
+    }
+
+    return {
+      ReaderBatteryIndicatorStyle.capsule:
+          _readerBatteryIndicatorLabels[ReaderBatteryIndicatorStyle.capsule]!,
+      ReaderBatteryIndicatorStyle.capsuleDynamic:
+          _readerBatteryIndicatorLabels[ReaderBatteryIndicatorStyle
+              .capsuleDynamic]!,
+    };
+  }
+
+  Widget _buildReaderBatteryIndicatorOptionIcon(
+    BuildContext context,
+    ReaderBatteryIndicatorStyle style,
+    bool isSelected,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    switch (style) {
+      case ReaderBatteryIndicatorStyle.capsule:
+        return const Icon(Icons.adjust, color: Color(0xFF34C759));
+      case ReaderBatteryIndicatorStyle.capsuleDynamic:
+        return Icon(Icons.adjust, color: colorScheme.primaryContainer);
+      case ReaderBatteryIndicatorStyle.text:
+        return Icon(
+          Icons.text_fields,
+          color:
+              isSelected ? colorScheme.primary : colorScheme.onSurfaceVariant,
+        );
+    }
   }
 
   void _showCleanChapterTitleScopeSheet(BuildContext context) {

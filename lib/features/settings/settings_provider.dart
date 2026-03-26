@@ -11,6 +11,8 @@ import 'package:novella/data/services/book_info_cache_service.dart';
 
 enum ReaderViewMode { scroll, paged }
 
+enum ReaderBatteryIndicatorStyle { capsule, capsuleDynamic, text }
+
 /// 设置状态模型
 class AppSettings {
   final bool isLoaded;
@@ -18,6 +20,7 @@ class AppSettings {
   final bool readerFirstLineIndent;
   final double readerLineHeight;
   final ReaderViewMode readerViewMode;
+  final ReaderBatteryIndicatorStyle readerBatteryIndicatorStyle;
   final String theme; // 'system'（系统）, 'light'（浅色）, 'dark'（深色）
   final String appFontFamily;
   final String appFontFileName;
@@ -86,6 +89,7 @@ class AppSettings {
     this.readerFirstLineIndent = false,
     this.readerLineHeight = 1.6,
     this.readerViewMode = ReaderViewMode.paged,
+    this.readerBatteryIndicatorStyle = ReaderBatteryIndicatorStyle.text,
     this.theme = 'system',
     this.appFontFamily = '',
     this.appFontFileName = '',
@@ -127,6 +131,15 @@ class AppSettings {
   /// 是否使用 iOS 18 样式
   bool get useIOS18Style => iosDisplayStyle == 'ios18' && Platform.isIOS;
 
+  bool get supportsTextBatteryIndicator => !Platform.isIOS;
+
+  ReaderBatteryIndicatorStyle get effectiveReaderBatteryIndicatorStyle =>
+      supportsTextBatteryIndicator
+          ? readerBatteryIndicatorStyle
+          : (readerBatteryIndicatorStyle == ReaderBatteryIndicatorStyle.text
+              ? ReaderBatteryIndicatorStyle.capsule
+              : readerBatteryIndicatorStyle);
+
   bool get hasCustomAppFont =>
       appFontFamily.isNotEmpty && appFontFileName.isNotEmpty;
 
@@ -136,6 +149,7 @@ class AppSettings {
     bool? readerFirstLineIndent,
     double? readerLineHeight,
     ReaderViewMode? readerViewMode,
+    ReaderBatteryIndicatorStyle? readerBatteryIndicatorStyle,
     String? theme,
     String? appFontFamily,
     String? appFontFileName,
@@ -178,6 +192,8 @@ class AppSettings {
           readerFirstLineIndent ?? this.readerFirstLineIndent,
       readerLineHeight: readerLineHeight ?? this.readerLineHeight,
       readerViewMode: readerViewMode ?? this.readerViewMode,
+      readerBatteryIndicatorStyle:
+          readerBatteryIndicatorStyle ?? this.readerBatteryIndicatorStyle,
       theme: theme ?? this.theme,
       appFontFamily: appFontFamily ?? this.appFontFamily,
       appFontFileName: appFontFileName ?? this.appFontFileName,
@@ -252,6 +268,10 @@ class SettingsNotifier extends Notifier<AppSettings> {
     _loadSettings();
     return AppSettings(
       useSystemColor: Platform.isAndroid || Platform.isWindows,
+      readerBatteryIndicatorStyle:
+          Platform.isIOS
+              ? ReaderBatteryIndicatorStyle.capsule
+              : ReaderBatteryIndicatorStyle.text,
     );
   }
 
@@ -271,6 +291,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
       readerLineHeight: prefs.getDouble('setting_readerLineHeight') ?? 1.6,
       readerViewMode: _parseReaderViewMode(
         prefs.getString('setting_readerViewMode'),
+      ),
+      readerBatteryIndicatorStyle: _parseReaderBatteryIndicatorStyle(
+        prefs.getString('setting_readerBatteryIndicatorStyle'),
       ),
       theme: prefs.getString('setting_theme') ?? 'system',
       appFontFamily: prefs.getString('setting_appFontFamily') ?? '',
@@ -342,6 +365,10 @@ class SettingsNotifier extends Notifier<AppSettings> {
     );
     await prefs.setDouble('setting_readerLineHeight', state.readerLineHeight);
     await prefs.setString('setting_readerViewMode', state.readerViewMode.name);
+    await prefs.setString(
+      'setting_readerBatteryIndicatorStyle',
+      state.readerBatteryIndicatorStyle.name,
+    );
     await prefs.setString('setting_theme', state.theme);
     await prefs.setString('setting_appFontFamily', state.appFontFamily);
     await prefs.setString('setting_appFontFileName', state.appFontFileName);
@@ -424,6 +451,16 @@ class SettingsNotifier extends Notifier<AppSettings> {
 
   void setReaderViewMode(ReaderViewMode value) {
     state = state.copyWith(readerViewMode: value);
+    _save();
+  }
+
+  void setReaderBatteryIndicatorStyle(ReaderBatteryIndicatorStyle value) {
+    state = state.copyWith(
+      readerBatteryIndicatorStyle:
+          Platform.isIOS && value == ReaderBatteryIndicatorStyle.text
+              ? ReaderBatteryIndicatorStyle.capsule
+              : value,
+    );
     _save();
   }
 
@@ -691,6 +728,23 @@ ReaderViewMode _parseReaderViewMode(String? raw) {
   }
 
   return ReaderViewMode.paged;
+}
+
+ReaderBatteryIndicatorStyle _parseReaderBatteryIndicatorStyle(String? raw) {
+  if (raw != null) {
+    for (final style in ReaderBatteryIndicatorStyle.values) {
+      if (style.name == raw) {
+        if (Platform.isIOS && style == ReaderBatteryIndicatorStyle.text) {
+          return ReaderBatteryIndicatorStyle.capsule;
+        }
+        return style;
+      }
+    }
+  }
+
+  return Platform.isIOS
+      ? ReaderBatteryIndicatorStyle.capsule
+      : ReaderBatteryIndicatorStyle.text;
 }
 
 /// 设置提供者

@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 import 'package:logging/logging.dart';
 import 'package:novella/core/utils/font_manager.dart';
+import 'package:novella/core/utils/time_utils.dart';
 import 'package:novella/data/services/chapter_service.dart';
 import 'package:novella/data/services/reading_progress_service.dart';
 import 'package:novella/data/services/reading_time_service.dart';
@@ -20,6 +21,7 @@ import 'package:novella/features/book/book_detail_page.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:html/dom.dart' as dom;
 import 'package:novella/features/reader/reader_background_page.dart';
+import 'package:novella/features/reader/shared/reader_battery_indicator.dart';
 import 'package:novella/features/reader/shared/reader_chapter_sheet.dart';
 import 'package:novella/features/reader/shared/reader_image_view.dart';
 import 'package:novella/features/reader/shared/reader_text_sanitizer.dart';
@@ -1457,13 +1459,9 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
 
   void _updateTime() {
     final now = DateTime.now();
-    final hour = now.hour;
-    final minute = now.minute.toString().padLeft(2, '0');
-    final period = hour < 12 ? '上午' : '下午';
-    final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
 
     if (!mounted) return;
-    _timeStringNotifier.value = '$period $displayHour:$minute';
+    _timeStringNotifier.value = TimeUtils.formatChineseDayPeriodTime(now);
   }
 
   Future<void> _updateBattery() async {
@@ -3066,83 +3064,23 @@ class _ReaderScrollPageState extends ConsumerState<ReaderScrollPage>
                                     ),
                                   ),
                                   const SizedBox(width: 8),
-
-                                  // IOS: 自定义电池条
-                                  if (Platform.isIOS) ...[
-                                    AnimatedBuilder(
-                                      animation: Listenable.merge([
+                                  ReaderBatteryIndicator(
+                                    batteryLevelListenable:
                                         _batteryLevelNotifier,
+                                    batteryStateListenable:
                                         _batteryStateNotifier,
-                                      ]),
-                                      builder: (context, _) {
-                                        final batteryLevel =
-                                            _batteryLevelNotifier.value;
-                                        final batteryState =
-                                            _batteryStateNotifier.value;
-
-                                        final widthFactor = (batteryLevel /
-                                                100.0)
-                                            .clamp(0.0, 1.0);
-
-                                        final barColor = () {
-                                          if (batteryState ==
-                                              BatteryState.charging) {
-                                            // K: 充电则显示蓝色条
-                                            return Colors.blue;
-                                          }
-                                          // 正常状态
-                                          if (batteryLevel <= 15) {
-                                            return Colors.red; // 15% 以下红
-                                          } else if (batteryLevel <= 35) {
-                                            return Colors.yellow; // 35% 以下黄
-                                          }
-                                          // 默认绿
-                                          return const Color(0xFF34C759);
-                                        }();
-
-                                        return Container(
-                                          width: 36,
-                                          height: 6,
-                                          decoration: BoxDecoration(
-                                            color: subTextColor.withValues(
-                                              alpha: 0.2,
-                                            ),
-                                            borderRadius: BorderRadius.circular(
-                                              3,
-                                            ),
-                                          ),
-                                          alignment: Alignment.centerLeft,
-                                          child: FractionallySizedBox(
-                                            widthFactor: widthFactor,
-                                            heightFactor: 1.0,
-                                            child: Container(
-                                              decoration: BoxDecoration(
-                                                color: barColor,
-                                                borderRadius:
-                                                    BorderRadius.circular(3),
-                                              ),
-                                            ),
-                                          ),
-                                        );
-                                      },
+                                    style:
+                                        settings
+                                            .effectiveReaderBatteryIndicatorStyle,
+                                    color: subTextColor,
+                                    textStyle: Theme.of(
+                                      context,
+                                    ).textTheme.bodySmall?.copyWith(
+                                      color: subTextColor,
+                                      fontSize: 11,
+                                      height: 1,
                                     ),
-                                  ] else
-                                    // 其他平台：百分比文字
-                                    ValueListenableBuilder<int>(
-                                      valueListenable: _batteryLevelNotifier,
-                                      builder: (context, batteryLevel, _) {
-                                        return Text(
-                                          '电量 $batteryLevel%',
-                                          style: Theme.of(
-                                            context,
-                                          ).textTheme.bodySmall?.copyWith(
-                                            color: subTextColor,
-                                            fontSize: 11,
-                                            height: 1,
-                                          ),
-                                        );
-                                      },
-                                    ),
+                                  ),
 
                                   const SizedBox(width: 8),
                                   SizedBox(

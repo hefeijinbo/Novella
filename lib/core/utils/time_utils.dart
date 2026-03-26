@@ -48,4 +48,39 @@ class TimeUtils {
       return '$years年前';
     }
   }
+
+  /// 按严格的 CLDR `zh` day period 规则格式化中文 12 小时时间。
+  static String formatChineseDayPeriodTime(DateTime dateTime) {
+    final local = dateTime.toLocal();
+    final hour = local.hour;
+    final minute = local.minute;
+    final displayHour = hour % 12 == 0 ? 12 : hour % 12;
+    final time = '$displayHour:${minute.toString().padLeft(2, '0')}';
+
+    if (hour == 0 && minute == 0) {
+      return '午夜 $time';
+    }
+
+    if (hour < 5) {
+      return '凌晨 $time';
+    }
+
+    if (hour < 8) {
+      return '清晨 $time';
+    }
+
+    if (hour < 12) {
+      return '上午 $time';
+    }
+
+    if (hour < 13) {
+      return '中午 $time';
+    }
+
+    if (hour < 19) {
+      return '下午 $time';
+    }
+
+    return '晚上 $time';
+  }
 }
