@@ -13,6 +13,8 @@ class RequestScopes {
   static const String home = 'home';
   static const String shelf = 'shelf';
   static const String history = 'history';
+  static const String community = 'community';
+  static const String notification = 'notification';
 
   const RequestScopes._();
 }

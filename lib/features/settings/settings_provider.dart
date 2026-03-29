@@ -257,7 +257,7 @@ class AppSettings {
 class SettingsNotifier extends Notifier<AppSettings> {
   int _normalizeStartupTabIndex(int? index) {
     final safeIndex = index ?? 0;
-    if (safeIndex < 0 || safeIndex > 2) {
+    if (safeIndex < 0 || safeIndex > 3) {
       return 0;
     }
     return safeIndex;

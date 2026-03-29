@@ -48,6 +48,35 @@ class _TokenStorage {
   }
 }
 
+typedef SignalREventHandler = void Function(List<Object?>? arguments);
+
+class SignalREventSubscription {
+  SignalREventSubscription._(this._onCancel);
+
+  final void Function() _onCancel;
+  bool _isCancelled = false;
+
+  void cancel() {
+    if (_isCancelled) {
+      return;
+    }
+    _isCancelled = true;
+    _onCancel();
+  }
+}
+
+class _SignalREventRegistration {
+  const _SignalREventRegistration({
+    required this.id,
+    required this.methodName,
+    required this.handler,
+  });
+
+  final int id;
+  final String methodName;
+  final SignalREventHandler handler;
+}
+
 class SignalRService {
   // 单例
   static final SignalRService _instance = SignalRService._internal();
@@ -67,6 +96,9 @@ class SignalRService {
   HubConnection? _hubConnection;
   final String _baseUrl = 'https://api.lightnovel.life';
   final RequestQueue _requestQueue = RequestQueue();
+  final Map<int, _SignalREventRegistration> _eventRegistrations =
+      <int, _SignalREventRegistration>{};
+  int _nextEventRegistrationId = 0;
 
   // 连接状态追踪
   Completer<void>? _connectionCompleter;
@@ -121,13 +153,17 @@ class SignalRService {
 
   /// 停止当前连接
   Future<void> stop() async {
-    if (_hubConnection != null) {
-      await _hubConnection?.stop();
-      _hubConnection = null;
-      _isStarting = false;
-      _connectionCompleter = null;
-      developer.log('Connection stopped', name: 'SIGNALR');
+    final existingConnection = _hubConnection;
+    if (existingConnection == null) {
+      return;
     }
+
+    _detachRegisteredEventHandlers(existingConnection);
+    await existingConnection.stop();
+    _hubConnection = null;
+    _isStarting = false;
+    _connectionCompleter = null;
+    developer.log('Connection stopped', name: 'SIGNALR');
   }
 
   /// 获取有效会话令牌
@@ -265,9 +301,11 @@ class SignalRService {
 
     // 启动新连接
     _isStarting = true;
+    _isStarting = true;
     _connectionCompleter = Completer<void>();
 
     if (_hubConnection != null) {
+      _detachRegisteredEventHandlers(_hubConnection!);
       await _hubConnection?.stop();
       _hubConnection = null;
     }
@@ -293,6 +331,8 @@ class SignalRService {
             .withAutomaticReconnect(retryDelays: [0, 5000, 10000, 20000, 30000])
             .withHubProtocol(NovelHubProtocol())
             .build();
+
+    _attachRegisteredEventHandlers();
 
     // 配置服务器超时 - 默认为 15s 故设为 30s
     _hubConnection?.serverTimeoutInMilliseconds = 30000;
@@ -335,6 +375,48 @@ class SignalRService {
 
   void cancelPendingRequests(String scope) {
     _requestQueue.cancelScope(scope);
+  }
+
+  SignalREventSubscription subscribe(
+    String methodName,
+    SignalREventHandler handler,
+  ) {
+    final registration = _SignalREventRegistration(
+      id: _nextEventRegistrationId++,
+      methodName: methodName,
+      handler: handler,
+    );
+    _eventRegistrations[registration.id] = registration;
+    _hubConnection?.on(methodName, registration.handler);
+    return SignalREventSubscription._(() {
+      _unsubscribe(registration.id);
+    });
+  }
+
+  void _unsubscribe(int registrationId) {
+    final registration = _eventRegistrations.remove(registrationId);
+    if (registration == null) {
+      return;
+    }
+
+    _hubConnection?.off(registration.methodName, method: registration.handler);
+  }
+
+  void _attachRegisteredEventHandlers() {
+    final connection = _hubConnection;
+    if (connection == null) {
+      return;
+    }
+
+    for (final registration in _eventRegistrations.values) {
+      connection.on(registration.methodName, registration.handler);
+    }
+  }
+
+  void _detachRegisteredEventHandlers(HubConnection connection) {
+    for (final registration in _eventRegistrations.values) {
+      connection.off(registration.methodName, method: registration.handler);
+    }
   }
 
   Future<T> invoke<T>(

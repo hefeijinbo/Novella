@@ -3,6 +3,7 @@ import 'dart:developer' as developer;
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_quill/flutter_quill.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
@@ -372,6 +373,7 @@ class _MyAppState extends ConsumerState<MyApp> with WidgetsBindingObserver {
           },
           // 本地化配置（含简体/繁体中文支持）
           localizationsDelegates: const [
+            FlutterQuillLocalizations.delegate,
             GlobalMaterialLocalizations.delegate,
             GlobalCupertinoLocalizations.delegate,
             GlobalWidgetsLocalizations.delegate,

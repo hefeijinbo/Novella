@@ -6,6 +6,8 @@ import 'package:novella/core/network/request_queue.dart';
 import 'package:novella/core/network/signalr_service.dart';
 import 'package:novella/core/services/update_service.dart';
 import 'package:novella/core/widgets/m3e_loading_indicator.dart';
+import 'package:novella/features/community/community_page.dart';
+import 'package:novella/features/community/notification_unread_provider.dart';
 import 'package:novella/features/history/history_page.dart';
 import 'package:novella/features/home/home_page.dart';
 import 'package:novella/features/settings/settings_page.dart';
@@ -23,6 +25,7 @@ class _MainPageState extends ConsumerState<MainPage> {
   final _homeKey = GlobalKey<HomePageState>();
   final _shelfKey = GlobalKey<ShelfPageState>();
   final _historyKey = GlobalKey<HistoryPageState>();
+  final _communityKey = GlobalKey<CommunityPageState>();
   final _signalRService = SignalRService();
   final Set<int> _loadedPages = <int>{0};
   bool _startupApplied = false;
@@ -35,6 +38,8 @@ class _MainPageState extends ConsumerState<MainPage> {
         return RequestScopes.shelf;
       case 2:
         return RequestScopes.history;
+      case 3:
+        return RequestScopes.community;
       default:
         return null;
     }
@@ -44,10 +49,11 @@ class _MainPageState extends ConsumerState<MainPage> {
     _homeKey.currentState?.setTabActive(activeIndex == 0);
     _shelfKey.currentState?.setTabActive(activeIndex == 1);
     _historyKey.currentState?.setTabActive(activeIndex == 2);
+    _communityKey.currentState?.setTabActive(activeIndex == 3);
   }
 
   void _cancelInactiveTabRequests(int activeIndex) {
-    for (var index = 0; index < 4; index++) {
+    for (var index = 0; index < 5; index++) {
       if (index == activeIndex) {
         continue;
       }
@@ -82,6 +88,8 @@ class _MainPageState extends ConsumerState<MainPage> {
       case 2:
         return HistoryPage(key: _historyKey);
       case 3:
+        return CommunityPage(key: _communityKey);
+      case 4:
         return const SettingsPage();
       default:
         return const SizedBox.shrink();
@@ -94,6 +102,8 @@ class _MainPageState extends ConsumerState<MainPage> {
         _shelfKey.currentState?.refresh();
       } else if (index == 2) {
         _historyKey.currentState?.refresh();
+      } else if (index == 3) {
+        _communityKey.currentState?.refresh();
       }
       return;
     }
@@ -110,6 +120,8 @@ class _MainPageState extends ConsumerState<MainPage> {
       _shelfKey.currentState?.refresh();
     } else if (index == 2) {
       _historyKey.currentState?.refresh();
+    } else if (index == 3) {
+      _communityKey.currentState?.refresh();
     }
   }
 
@@ -134,6 +146,8 @@ class _MainPageState extends ConsumerState<MainPage> {
 
       if (_currentIndex == 2) {
         _historyKey.currentState?.refresh();
+      } else if (_currentIndex == 3) {
+        _communityKey.currentState?.refresh();
       }
     });
   }
@@ -146,12 +160,14 @@ class _MainPageState extends ConsumerState<MainPage> {
     }
 
     _applyStartupSettingsIfNeeded(settings);
+    final unreadNotificationCount =
+        ref.watch(notificationUnreadCountProvider).asData?.value ?? 0;
 
     return AdaptiveScaffold(
       minimizeBehavior: TabBarMinimizeBehavior.never,
       body: IndexedStack(
         index: _currentIndex,
-        children: List<Widget>.generate(4, _buildPage),
+        children: List<Widget>.generate(5, _buildPage),
       ),
       bottomNavigationBar: AdaptiveBottomNavigationBar(
         selectedIndex: _currentIndex,
@@ -189,6 +205,25 @@ class _MainPageState extends ConsumerState<MainPage> {
             selectedIcon:
                 PlatformInfo.isIOS ? CupertinoIcons.time : Icons.history,
             label: '历史',
+          ),
+          AdaptiveNavigationDestination(
+            icon:
+                settings.useIOS26Style
+                    ? 'text.bubble.fill'
+                    : PlatformInfo.isIOS
+                    ? CupertinoIcons.chat_bubble_2
+                    : Icons.forum_outlined,
+            selectedIcon:
+                PlatformInfo.isIOS
+                    ? CupertinoIcons.chat_bubble_2_fill
+                    : Icons.forum,
+            label: '社区',
+            badgeCount:
+                unreadNotificationCount > 0
+                    ? unreadNotificationCount > 99
+                        ? 99
+                        : unreadNotificationCount
+                    : null,
           ),
           AdaptiveNavigationDestination(
             icon:

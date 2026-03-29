@@ -49,11 +49,12 @@ class ContentSettingsPage extends ConsumerWidget {
                       title: '默认页面',
                       subtitle: '选择应用冷启动后默认进入的页面',
                       currentValue: settings.startupTabIndex,
-                      options: const {0: '发现', 1: '书架', 2: '历史'},
+                      options: const {0: '发现', 1: '书架', 2: '历史', 3: '社区'},
                       icons: const {
                         0: Icons.explore_outlined,
                         1: Icons.collections_bookmark_outlined,
                         2: Icons.history,
+                        3: Icons.forum_outlined,
                       },
                       onSelected: notifier.setStartupTabIndex,
                     ),
@@ -178,7 +179,9 @@ class ContentSettingsPage extends ConsumerWidget {
   }
 
   String _getStartupPageSummary(AppSettings settings) {
-    return const {0: '发现', 1: '书架', 2: '历史'}[settings.startupTabIndex] ?? '发现';
+    return const {0: '发现', 1: '书架', 2: '历史', 3: '社区'}[settings
+            .startupTabIndex] ??
+        '发现';
   }
 
   void _showContentFilterSheet(BuildContext context) {

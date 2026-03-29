@@ -10,6 +10,7 @@ class UserProfile {
   final String inviteCode;
   final String groupName;
   final int point;
+  final int unreadNotificationCount;
   final DateTime? registerAt;
 
   const UserProfile({
@@ -20,6 +21,7 @@ class UserProfile {
     required this.inviteCode,
     required this.groupName,
     required this.point,
+    required this.unreadNotificationCount,
     required this.registerAt,
   });
 
@@ -34,6 +36,7 @@ class UserProfile {
       inviteCode: json['InviteCode'] as String? ?? '',
       groupName: role?['Name'] as String? ?? '',
       point: _toInt(json['Point']),
+      unreadNotificationCount: _toInt(json['UnreadNotificationCount']),
       registerAt: DateTime.tryParse(json['RegisterAt']?.toString() ?? ''),
     );
   }
