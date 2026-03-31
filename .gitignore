@@ -215,3 +215,6 @@ Web-master/
 # Local Docs
 # =====================================================
 docs/
+pubspec.lock
+ios/Podfile
+ios/Runner.xcworkspace/contents.xcworkspacedata

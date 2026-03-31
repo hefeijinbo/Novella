@@ -2,6 +2,13 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        maven {
+            url = uri("https://storage.googleapis.com/download.flutter.io")
+        }
+        // 清华镜像源（可选）
+        maven {
+            url = uri("https://mirrors.tuna.tsinghua.edu.cn/flutter/download.flutter.io/")
+        }
     }
 }
 
