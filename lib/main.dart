@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:developer' as developer;
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_quill/flutter_quill.dart';
@@ -47,12 +47,21 @@ class _SystemUiDebug {
   }
 }
 
+String _macOSRustLibraryPath() {
+  final executableDir = File(Platform.resolvedExecutable).parent.uri;
+  return executableDir
+      .resolve('../Frameworks/libnovella_native.dylib')
+      .toFilePath();
+}
+
 // === 加载 Native 库 ===
-// iOS/macOS: 静态链接 (process)
-// Windows/Android: 动态库 (open)
+// iOS: 静态链接 (process)
+// macOS/Windows/Android/Linux: 动态库 (open)
 ExternalLibrary _loadLibrary() {
-  if (Platform.isIOS || Platform.isMacOS) {
+  if (Platform.isIOS) {
     return ExternalLibrary.process(iKnowHowToUseIt: true);
+  } else if (Platform.isMacOS) {
+    return ExternalLibrary.open(_macOSRustLibraryPath());
   } else if (Platform.isWindows) {
     return ExternalLibrary.open('novella_native.dll');
   } else {
