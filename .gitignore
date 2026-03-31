@@ -218,3 +218,4 @@ docs/
 pubspec.lock
 ios/Podfile
 ios/Runner.xcworkspace/contents.xcworkspacedata
+pubspec.lock
