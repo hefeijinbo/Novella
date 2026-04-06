@@ -297,29 +297,28 @@ class CommunityPageState extends ConsumerState<CommunityPage> {
 
   Widget _buildHeader(int unreadCount) {
     final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return SafeArea(
       bottom: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
+        padding: const EdgeInsets.fromLTRB(24, 24, 16, 8),
         child: Row(
           children: [
             Expanded(
               child: Text(
                 '社区',
                 style: theme.textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.5,
+                  fontWeight: FontWeight.bold,
+                  color: colorScheme.onSurface,
                 ),
               ),
             ),
-            _HeaderActionButton(
+            IconButton(
               tooltip: '发布帖子',
-              icon: Icons.edit_note_rounded,
-              emphasized: true,
+              icon: const Icon(Icons.edit_note_rounded),
               onPressed: _openComposePage,
             ),
-            const SizedBox(width: 8),
             _NotificationActionButton(
               unreadCount: unreadCount,
               onPressed: _openNotificationPage,
@@ -1035,48 +1034,6 @@ class _PinnedToolbarDelegate extends SliverPersistentHeaderDelegate {
   }
 }
 
-class _HeaderActionButton extends StatelessWidget {
-  const _HeaderActionButton({
-    required this.tooltip,
-    required this.icon,
-    required this.onPressed,
-    this.emphasized = false,
-  });
-
-  final String tooltip;
-  final IconData icon;
-  final Future<void> Function() onPressed;
-  final bool emphasized;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final backgroundColor =
-        emphasized
-            ? colorScheme.primaryContainer.withValues(alpha: 0.7)
-            : colorScheme.surfaceContainerLow;
-    final foregroundColor =
-        emphasized ? colorScheme.primary : colorScheme.onSurface;
-
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: backgroundColor,
-        borderRadius: BorderRadius.circular(16),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: onPressed,
-          child: SizedBox(
-            width: 42,
-            height: 42,
-            child: Icon(icon, size: 21, color: foregroundColor),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _NotificationActionButton extends StatelessWidget {
   const _NotificationActionButton({
     required this.unreadCount,
@@ -1088,9 +1045,9 @@ class _NotificationActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final button = _HeaderActionButton(
+    final button = IconButton(
       tooltip: '通知中心',
-      icon: Icons.notifications_outlined,
+      icon: const Icon(Icons.notifications_outlined),
       onPressed: onPressed,
     );
 
