@@ -135,6 +135,13 @@ app.*.map.json
 **/ios/**/.generated/
 **/ios/**/xcshareddata/xcschemes/*.xcscheme
 !ios/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme
+!ios/Runner.xcodeproj/project.xcworkspace/
+ios/Runner.xcodeproj/project.xcworkspace/*
+!ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/
+ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/*
+!ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/*
+!ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 **/macos/**/*.mode1v3
 **/macos/**/*.mode2v3
 **/macos/**/*.moved-aside
@@ -219,3 +226,6 @@ pubspec.lock
 ios/Podfile
 ios/Runner.xcworkspace/contents.xcworkspacedata
 pubspec.lock
+packages/flutter_blurhash/pubspec.lock
+packages/cloudflare_turnstile/pubspec.lock
+packages/adaptive_platform_ui/pubspec.lock

@@ -37,6 +37,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   bool _hasSearched = false;
   String? _pendingDeleteItem;
   String _lastKeyword = '';
+  bool _lastSearchExact = false;
   static const int _pageSize = 24;
 
   @override
@@ -55,6 +56,21 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     _focusNode.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  bool _isQuotedSearchKeyword(String keyword) {
+    final trimmed = keyword.trim();
+    return trimmed.length >= 2 &&
+        trimmed.startsWith('"') &&
+        trimmed.endsWith('"');
+  }
+
+  String _buildRequestKeyword(String keyword, {required bool exact}) {
+    final trimmed = keyword.trim();
+    if (trimmed.isEmpty || _isQuotedSearchKeyword(trimmed) || !exact) {
+      return trimmed;
+    }
+    return '"$trimmed"';
   }
 
   Future<void> _loadHistory() async {
@@ -120,7 +136,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     }
   }
 
-  void _submitSearch([String? overrideKeyword]) {
+  void _submitSearch({String? overrideKeyword, bool exact = false}) {
     final keyword = overrideKeyword ?? _searchController.text.trim();
     if (keyword.isEmpty) return;
 
@@ -129,6 +145,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
     _addToHistory(keyword);
     _lastKeyword = keyword;
+    _lastSearchExact = exact || _isQuotedSearchKeyword(keyword);
     if (_searchController.text != keyword) {
       _searchController.text = keyword;
     }
@@ -150,11 +167,15 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
     try {
       final settings = ref.read(settingsProvider);
+      final requestKeyword = _buildRequestKeyword(
+        _lastKeyword,
+        exact: _lastSearchExact,
+      );
       int targetValidCount = page * _pageSize;
 
       while (_allValidBooks.length < targetValidCount && !_hasReachedEnd) {
         final result = await _bookService.searchBooks(
-          _lastKeyword,
+          requestKeyword,
           page: _nextBackendPage,
           size: _pageSize,
           ignoreJapanese: settings.ignoreJapanese,
@@ -260,7 +281,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
     }
     // 搜索前收起键盘
     FocusScope.of(context).unfocus();
-    _submitSearch(keyword);
+    _submitSearch(overrideKeyword: keyword);
   }
 
   void _onHistoryLongPress(String keyword) {
@@ -276,6 +297,23 @@ class _SearchPageState extends ConsumerState<SearchPage> {
 
     return Scaffold(
       appBar: AppBar(
+        actionsPadding: const EdgeInsets.only(right: 8),
+        actions: [
+          IconButton(
+            tooltip: '精确搜索',
+            icon: const Icon(Icons.format_quote_rounded),
+            onPressed:
+                () => _submitSearch(
+                  overrideKeyword: _searchController.text.trim(),
+                  exact: true,
+                ),
+          ),
+          IconButton(
+            tooltip: '搜索',
+            icon: const Icon(Icons.search),
+            onPressed: () => _submitSearch(),
+          ),
+        ],
         title: TextField(
           controller: _searchController,
           focusNode: _focusNode,
@@ -283,10 +321,6 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             hintText: '搜索书籍...',
             border: InputBorder.none,
             contentPadding: const EdgeInsets.symmetric(vertical: 15),
-            suffixIcon: IconButton(
-              icon: const Icon(Icons.search),
-              onPressed: () => _submitSearch(),
-            ),
           ),
           textInputAction: TextInputAction.search,
           onSubmitted: (_) => _submitSearch(),
@@ -407,7 +441,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             ),
             const SizedBox(height: 16),
             Text(
-              '没有找到相关书籍',
+              _lastSearchExact ? '没有找到精确搜索结果' : '没有找到相关书籍',
               style: textTheme.bodyLarge?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),
