@@ -55,17 +55,14 @@ class AuthService {
   /// 失败时抛出 Exception（携带服务端错误信息），供 UI 展示。
   Future<void> login(
     String email,
-    String password, {
-    required String turnstileToken,
-  }) async {
-    final passwordHash = sha256.convert(utf8.encode(password)).toString();
+    String password) async {
+    // final passwordHash = sha256.convert(utf8.encode(password)).toString();
     try {
       final response = await _apiClient.dio.post(
-        '/api/user/login',
+        '/user/login',
         data: {
-          'email': email,
-          'password': passwordHash,
-          'token': turnstileToken,
+          'username': email,
+          'password': password,
         },
       );
 
@@ -74,34 +71,20 @@ class AuthService {
         _logger.info('Login Response: $data');
 
         if (data is Map) {
-          // 处理形如 { Success: false, Msg: 'xxx' } 的标准防刷/业务错误
-          if (data['Success'] == false) {
-            final msg = data['Msg'] ?? data['msg'] ?? '登录失败，请稍后重试';
+          // 处理 novel-front 返回格式：{ code: 200, data: { token: "xxx" } }
+          final code = data['code'];
+          
+          if (code != 200) {
+            final msg = data['message'] ?? data['msg'] ?? '登录失败，请稍后重试';
             throw Exception(msg);
           }
 
-          if (data['Success'] == true || data['Response'] != null) {
-            final resp = data['Response'] ?? data;
-            final accessToken = resp['Token'];
-            final refreshToken = resp['RefreshToken'];
+          final responseData = data['data'];
+          if (responseData is Map) {
+            final token = responseData['token'];
 
-            if (refreshToken is String && refreshToken.isNotEmpty) {
-              await saveTokens(
-                accessToken is String ? accessToken : '',
-                refreshToken,
-              );
-              return;
-            }
-          } else {
-            // 回退到如果字段直接在顶级
-            final accessToken = data['Token'];
-            final refreshToken = data['RefreshToken'];
-
-            if (refreshToken is String && refreshToken.isNotEmpty) {
-              await saveTokens(
-                accessToken is String ? accessToken : '',
-                refreshToken,
-              );
+            if (token is String && token.isNotEmpty) {
+              await saveTokens(token, '');
               return;
             }
           }
@@ -183,16 +166,13 @@ class AuthService {
     required String code,
     String? inviteCode,
   }) async {
-    final passwordHash = sha256.convert(utf8.encode(password)).toString();
     try {
       final response = await _apiClient.dio.post(
-        '/api/user/register',
+        '/user/register',
         data: {
-          'userName': userName,
-          'email': email,
-          'password': passwordHash,
-          'code': code,
-          'inviteCode': inviteCode,
+          'username': userName,
+          'password': password,
+          'velCode': code,
         },
       );
 
@@ -201,22 +181,19 @@ class AuthService {
         _logger.info('Register Response: $data');
 
         if (data is Map) {
-          // 处理形如 { Success: false, Msg: 'xxx' } 的标准防刷/业务错误
-          if (data['Success'] == false) {
-            final msg = data['Msg'] ?? data['msg'] ?? '注册失败，请稍后重试';
+          final code = data['code'];
+          
+          if (code != 200) {
+            final msg = data['message'] ?? data['msg'] ?? '注册失败，请稍后重试';
             throw Exception(msg);
           }
 
-          if (data['Success'] == true || data['Response'] != null) {
-            final resp = data['Response'] ?? data;
-            final accessToken = resp['Token'];
-            final refreshToken = resp['RefreshToken'];
+          final responseData = data['data'];
+          if (responseData is Map) {
+            final token = responseData['token'];
 
-            if (refreshToken is String && refreshToken.isNotEmpty) {
-              await saveTokens(
-                accessToken is String ? accessToken : '',
-                refreshToken,
-              );
+            if (token is String && token.isNotEmpty) {
+              await saveTokens(token, '');
               return;
             }
           }
@@ -267,7 +244,12 @@ class AuthService {
     final parts = token.split('.');
     if (parts.length != 3) return null;
     try {
-      final payload = base64Url.normalize(parts[1]);
+      String payload = parts[1];
+      // 添加 base64 padding
+      final padding = 4 - payload.length % 4;
+      if (padding < 4) {
+        payload += '=' * padding;
+      }
       final payloadBytes = base64Url.decode(payload);
       final payloadObj = jsonDecode(utf8.decode(payloadBytes));
       if (payloadObj is! Map) return null;
@@ -339,15 +321,6 @@ class AuthService {
     // 保存刷新令牌
     if (refreshToken.isNotEmpty) {
       await prefs.setString('refresh_token', refreshToken);
-
-      // 若无会话令牌，尝试刷新获取
-      if (token.isEmpty) {
-        _logger.info('No session token, attempting to refresh...');
-        final tokenCandidate = await _refreshSessionToken(refreshToken);
-        if (tokenCandidate == null) {
-          throw Exception('Failed to refresh session token');
-        }
-      }
     }
 
     _logger.info('Tokens saved. Re-initializing SignalR explicitly...');
@@ -390,35 +363,50 @@ class AuthService {
 
     try {
       _logger.info('Performing network refresh for session token...');
+      
+      // novel-front 需要使用当前的 session token 来刷新
+      final currentToken = _sessionToken;
+      if (currentToken == null || currentToken.isEmpty) {
+        _logger.warning('No current token to refresh');
+        completer.complete(null);
+        return null;
+      }
+
       final response = await _apiClient.dio.post(
-        '/api/user/refresh_token',
-        data: {'token': refreshToken},
+        '/user/refreshToken',
+        options: Options(
+          headers: {
+            'Authorization': currentToken,
+          },
+        ),
       );
 
       _logger.info('Refresh API response status: ${response.statusCode}');
 
       if (response.statusCode == 200) {
-        String? newToken;
-        if (response.data is String) {
-          newToken = response.data;
-        } else if (response.data is Map) {
-          if (response.data['Response'] != null) {
-            newToken = response.data['Response'];
-          } else if (response.data['Token'] != null) {
-            newToken = response.data['Token'];
+        final data = response.data;
+        
+        if (data is Map) {
+          final code = data['code'];
+          
+          if (code == 200) {
+            final responseData = data['data'];
+            if (responseData is Map) {
+              final newToken = responseData['token'];
+
+              if (newToken != null && newToken.isNotEmpty) {
+                _sessionToken = newToken;
+                _lastRefreshTime = DateTime.now();
+
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setString('auth_token', newToken);
+
+                _logger.info('Session token refreshed successfully');
+                completer.complete(newToken);
+                return newToken;
+              }
+            }
           }
-        }
-
-        if (newToken != null && newToken.isNotEmpty) {
-          _sessionToken = newToken;
-          _lastRefreshTime = DateTime.now();
-
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('auth_token', newToken);
-
-          _logger.info('Session token refreshed successfully');
-          completer.complete(newToken);
-          return newToken;
         }
       }
 
@@ -442,10 +430,17 @@ class AuthService {
   ///
   /// 用于 iOS resumed 后的“预热”，避免用户第一次点击触发请求时才发现 token 过期。
   Future<String> forceRefreshSessionToken() async {
+    if (_sessionToken != null && _sessionToken!.isNotEmpty) {
+      return await _refreshSessionToken('', force: true) ?? '';
+    }
+      
     final prefs = await SharedPreferences.getInstance();
     final refreshToken = prefs.getString('refresh_token');
-    if (refreshToken == null || refreshToken.isEmpty) return '';
-    return await _refreshSessionToken(refreshToken, force: true) ?? '';
+    if (refreshToken != null && refreshToken.isNotEmpty) {
+      return await _refreshSessionToken(refreshToken, force: true) ?? '';
+    }
+      
+    return '';
   }
 
   /// 使本地会话 token 缓存失效
@@ -466,32 +461,39 @@ class AuthService {
     }
 
     // 2. 需要刷新或正在刷新
-    final prefs = await SharedPreferences.getInstance();
-    final refreshToken = prefs.getString('refresh_token');
-    if (refreshToken == null || refreshToken.isEmpty) return '';
+    if (_sessionToken == null || _sessionToken!.isEmpty) {
+      final prefs = await SharedPreferences.getInstance();
+      final savedToken = prefs.getString('auth_token');
+      if (savedToken != null && savedToken.isNotEmpty) {
+        _sessionToken = savedToken;
+        _lastRefreshTime = DateTime.now();
+        
+        // 如果加载的 token 仍然有效，直接返回
+        if (DateTime.now().difference(_lastRefreshTime!) < _tokenValidity) {
+          return _sessionToken!;
+        }
+      }
+    }
 
-    return await _refreshSessionToken(refreshToken) ?? '';
+    // 3. 需要刷新
+    return await _refreshSessionToken('') ?? '';
   }
 
-  /// 尝试使用存储的刷新令牌自动登录
-  /// 会实际调用 API 验证 refresh token 是否有效
+  /// 尝试使用存储的 token 自动登录
   Future<bool> tryAutoLogin() async {
     final prefs = await SharedPreferences.getInstance();
-    final refreshToken = prefs.getString('refresh_token');
+    final savedToken = prefs.getString('auth_token');
 
-    if (refreshToken == null || refreshToken.isEmpty) {
-      _logger.info('No refresh token found');
+    if (savedToken == null || savedToken.isEmpty) {
+      _logger.info('No auth token found');
       return false;
     }
 
     _logger.info('Found refresh token, attempting to refresh session...');
 
-    // 尝试刷新 session token 来验证 refresh token 有效性
-    final newToken = await _refreshSessionToken(refreshToken);
-    if (newToken == null) {
-      _logger.warning('Failed to refresh session token, token may be invalid');
-      return false;
-    }
+    // 直接使用保存的 token
+    _sessionToken = savedToken;
+    _lastRefreshTime = DateTime.now();
 
     // 等待 SignalR 断开旧连接（如果有）并用新 Token 重新就绪，以防止无身份管道被沿用
     // 阻塞进入主页的过程，展示加载圈，直到连接就绪或失败

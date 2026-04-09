@@ -12,7 +12,8 @@ class ApiClient {
   ApiClient._internal() {
     _dio = Dio(
       BaseOptions(
-        baseUrl: 'https://api.lightnovel.life',
+        // baseUrl: 'https://api.lightnovel.life',
+        baseUrl: 'http://127.0.0.1:8083',
         connectTimeout: const Duration(seconds: 30),
         receiveTimeout: const Duration(seconds: 30),
         headers: {'Content-Type': 'application/json'},

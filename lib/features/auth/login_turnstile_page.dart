@@ -622,7 +622,6 @@ class _LoginTurnstilePageState extends State<LoginTurnstilePage>
                   await _authService.login(
                     _loginEmailController.text.trim(),
                     _loginPasswordController.text,
-                    turnstileToken: token,
                   );
                   if (!mounted) return;
                   _showSnack('登录成功');
