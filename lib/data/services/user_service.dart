@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:logging/logging.dart';
+import 'package:novella/core/network/api_client.dart';
 import 'package:novella/core/network/request_queue.dart';
 import 'package:novella/core/network/signalr_service.dart';
 import 'package:novella/data/models/book.dart';
@@ -12,6 +13,7 @@ class UserService extends ChangeNotifier {
   factory UserService() => _instance;
   UserService._internal();
 
+  final ApiClient _apiClient = ApiClient();
   final SignalRService _signalRService = SignalRService();
   final Uuid _uuid = const Uuid();
 
@@ -41,54 +43,53 @@ class UserService extends ChangeNotifier {
         await _waitForPendingShelfSync();
       }
 
-      final result = await _signalRService.invoke<Map<dynamic, dynamic>>(
-        'GetBookShelf',
-        requestScope: requestScope,
-        priority: priority,
-        args: <Object>[
-          {},
-          {'UseGzip': true},
-        ],
+      // 使用 novel-front 的 REST API 获取书架
+      final response = await _apiClient.dio.get(
+        '/user/listBookShelfByPage',
+        queryParameters: {
+          'curr': 1,
+          'limit': 100, // 获取最多100本
+        },
       );
 
-      if (result.isEmpty) {
-        _logger.warning('Empty shelf response from server');
+      if (response.statusCode != 200 || response.data['code'] != 200) {
+        _logger.warning('Failed to fetch shelf from server');
         if (_initialized) {
           return _shelfCache.map((e) => ShelfItem.fromJson(e)).toList();
         }
         return _initializeEmptyShelf();
       }
 
-      final data = result['data'] ?? result['Data'];
-      if (data == null) {
-        _logger.warning(
-          'Null shelf payload from server, treating as empty shelf',
-        );
+      final pageData = response.data['data'];
+      if (pageData == null || pageData is! Map) {
+        _logger.warning('Null or invalid shelf payload from server');
         if (_initialized) {
           return _shelfCache.map((e) => ShelfItem.fromJson(e)).toList();
         }
         return _initializeEmptyShelf();
       }
 
-      if (data is! List) {
-        _logger.warning('Unexpected shelf data type: ${data?.runtimeType}');
-        if (_initialized) {
-          return _shelfCache.map((e) => ShelfItem.fromJson(e)).toList();
-        }
-        return [];
-      }
-
+      final List<dynamic> shelfList = pageData['list'] ?? [];
+      
+      // 将 novel-front 的 BookShelfVO 转换为 Novella 的 ShelfItem 格式
+      // novel-front 不支持文件夹，所有书籍都在根目录
       _shelfCache = _squeezeShelfItemIndices(
-        data
-            .map(
-              (e) =>
-                  _normalizeShelfItemMap(Map<String, dynamic>.from(e as Map)),
-            )
-            .toList(),
+        shelfList.asMap().entries.map((entry) {
+          final index = entry.key;
+          final item = entry.value as Map<String, dynamic>;
+          return {
+            'type': 'BOOK',
+            'id': item['bookId']?.toString() ?? '',
+            'title': item['bookName'] as String? ?? '',
+            'parents': <String>[], // 根目录
+            'index': index,
+            'updateAt': item['updateTime'] ?? item['createTime'] ?? DateTime.now().toIso8601String(),
+          };
+        }).toList(),
       );
       _initialized = true;
 
-      _logger.info('Parsed ${data.length} shelf items');
+      _logger.info('Parsed ${_shelfCache.length} shelf items from novel-front');
       notifyListeners();
 
       return _shelfCache.map((e) => ShelfItem.fromJson(e)).toList();
