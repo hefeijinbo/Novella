@@ -1,4 +1,6 @@
+import 'package:dio/dio.dart';
 import 'package:logging/logging.dart';
+import 'package:novella/core/network/api_client.dart';
 import 'package:novella/core/network/request_queue.dart';
 import 'package:novella/core/network/signalr_service.dart';
 
@@ -26,18 +28,16 @@ class UserProfile {
   });
 
   factory UserProfile.fromJson(Map<dynamic, dynamic> json) {
-    final role = json['Role'] as Map<dynamic, dynamic>?;
-
     return UserProfile(
-      id: _toInt(json['Id']),
-      userName: json['UserName'] as String? ?? '',
-      avatar: json['Avatar'] as String? ?? '',
-      email: json['Email'] as String? ?? '',
-      inviteCode: json['InviteCode'] as String? ?? '',
-      groupName: role?['Name'] as String? ?? '',
-      point: _toInt(json['Point']),
-      unreadNotificationCount: _toInt(json['UnreadNotificationCount']),
-      registerAt: DateTime.tryParse(json['RegisterAt']?.toString() ?? ''),
+      id: _toInt(json['id']),
+      userName: json['username'] as String? ?? '',
+      avatar: json['userPhoto'] as String? ?? '',
+      email: '',
+      inviteCode: '',
+      groupName: '',
+      point: _toInt(json['accountBalance']),
+      unreadNotificationCount: 0,
+      registerAt: DateTime.tryParse(json['createTime']?.toString() ?? ''),
     );
   }
 
@@ -51,6 +51,7 @@ class UserProfile {
 class UserProfileService {
   static final Logger _logger = Logger('UserProfileService');
 
+  final ApiClient _apiClient = ApiClient();
   final SignalRService _signalRService = SignalRService();
 
   Future<UserProfile> getMyInfo({
@@ -58,30 +59,26 @@ class UserProfileService {
     RequestPriority priority = RequestPriority.normal,
   }) async {
     try {
-      return UserProfile.fromJson(
-        await _invokeMyInfo(
-          requestScope: requestScope,
-          priority: priority,
-          args: [
-            <String, dynamic>{},
-            {'UseGzip': true},
-          ],
-        ),
-      );
+      final response = await _apiClient.dio.get('/user/userInfo');
+      
+      if (response.statusCode == 200) {
+        final data = response.data;
+        if (data is Map) {
+          final code = data['code'];
+          if (code == 200) {
+            final userInfo = data['data'];
+            if (userInfo != null) {
+              return UserProfile.fromJson(userInfo);
+            }
+          }
+        }
+      }
+      throw Exception('获取用户信息失败');
+    } on DioException catch (e) {
+      _logger.severe('Failed to get user info: ${e.message}');
+      rethrow;
     } catch (e) {
-      if (isRequestCancelledError(e)) rethrow;
-      _logger.warning(
-        'GetMyInfo with Web-style args failed, retrying without options: $e',
-      );
-    }
-
-    try {
-      return UserProfile.fromJson(
-        await _invokeMyInfo(requestScope: requestScope, priority: priority),
-      );
-    } catch (e) {
-      if (isRequestCancelledError(e)) rethrow;
-      _logger.severe('Failed to get my info: $e');
+      _logger.severe('Failed to get user info: $e');
       rethrow;
     }
   }
@@ -91,51 +88,7 @@ class UserProfileService {
     String? requestScope,
     RequestPriority priority = RequestPriority.normal,
   }) async {
-    try {
-      await _invokeSetAvatar(
-        url,
-        requestScope: requestScope,
-        priority: priority,
-        args: [
-          {'Url': url},
-          {'UseGzip': true},
-        ],
-      );
-    } catch (e) {
-      if (isRequestCancelledError(e)) rethrow;
-      _logger.severe('Failed to set avatar: $e');
-      rethrow;
-    }
-  }
-
-  Future<Map<dynamic, dynamic>> _invokeMyInfo({
-    String? requestScope,
-    RequestPriority priority = RequestPriority.normal,
-    List<Object>? args,
-  }) {
-    return _signalRService.invoke<Map<dynamic, dynamic>>(
-      'GetMyInfo',
-      requestScope: requestScope,
-      priority: priority,
-      args: args,
-    );
-  }
-
-  Future<void> _invokeSetAvatar(
-    String url, {
-    String? requestScope,
-    RequestPriority priority = RequestPriority.normal,
-    List<Object>? args,
-  }) {
-    return _signalRService.invoke<void>(
-      'SetAvatar',
-      requestScope: requestScope,
-      priority: priority,
-      args:
-          args ??
-          [
-            {'Url': url},
-          ],
-    );
+    _logger.warning('setAvatar not implemented for novel-front');
+    throw UnimplementedError('当前版本不支持设置头像功能');
   }
 }
