@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blurhash/flutter_blurhash.dart';
+import 'package:logging/logging.dart';
 import 'package:novella/core/utils/cover_url_utils.dart';
 import 'package:novella/core/widgets/m3e_loading_indicator.dart';
 
@@ -45,6 +46,7 @@ class BookCoverImage extends StatefulWidget {
 }
 
 class _BookCoverImageState extends State<BookCoverImage> {
+  static final _logger = Logger('BookCoverImage');
   static const Duration _minimumPlaceholderDuration = Duration(
     milliseconds: 120,
   );
@@ -80,6 +82,9 @@ class _BookCoverImageState extends State<BookCoverImage> {
 
   void _retry() {
     if (!mounted) return;
+    final headers = CoverUrlUtils.getImageHeaders(widget.imageUrl);
+    _logger.info('Retrying image load (attempt ${_retryCount + 1}): ${widget.imageUrl}');
+    _logger.info('Retry headers: $headers');
     CachedNetworkImage.evictFromCache(widget.imageUrl).then((_) {
       if (mounted) {
         setState(() {
@@ -199,6 +204,14 @@ class _BookCoverImageState extends State<BookCoverImage> {
     final colorScheme = Theme.of(context).colorScheme;
     // extractBlurHash 内含完整验证，返回 null 表示无效
     final blurHash = CoverUrlUtils.extractBlurHash(widget.imageUrl);
+    // 获取图片请求的 Headers（豆瓣图片需要设置 Referer）
+    final headers = CoverUrlUtils.getImageHeaders(widget.imageUrl);
+    
+    _logger.info('Building BookCoverImage:');
+    _logger.info('  URL: ${widget.imageUrl}');
+    _logger.info('  Is Douban: ${CoverUrlUtils.isDoubanImage(widget.imageUrl)}');
+    _logger.info('  Headers: $headers');
+    
     final cacheKey = ValueKey('${widget.imageUrl}_$_retryCount');
 
     if (widget.imageUrl.isEmpty) {
@@ -237,9 +250,11 @@ class _BookCoverImageState extends State<BookCoverImage> {
               widget.imageUrl,
               maxWidth: widget.memCacheWidth,
               maxHeight: widget.memCacheHeight,
+              headers: headers,
             ),
             fit: widget.fit,
             frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+              _logger.info('Frame builder called - frame: $frame, wasSynchronouslyLoaded: $wasSynchronouslyLoaded');
               if (wasSynchronouslyLoaded) {
                 if (widget.animateSynchronouslyLoadedImage &&
                     !_showResolvedImage) {
@@ -268,7 +283,10 @@ class _BookCoverImageState extends State<BookCoverImage> {
                 ],
               );
             },
-            errorBuilder: (_, __, ___) {
+            errorBuilder: (_, error, stackTrace) {
+              _logger.severe('Image load failed for URL: ${widget.imageUrl}');
+              _logger.severe('Error: $error');
+              _logger.severe('Stack trace: $stackTrace');
               // 出错时自动重试一次
               if (_retryCount == 0) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {

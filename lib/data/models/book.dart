@@ -43,10 +43,6 @@ class Book {
   });
 
   factory Book.fromJson(Map<dynamic, dynamic> json) {
-    // 辅助处理键大小写（SignalR MsgPack 通常保留）
-    // 'LastUpdatedAt' 可能丢失 Date 对象转为字符串
-    // 兼容处理
-
     DateTime parseDate(dynamic date) {
       if (date is String) {
         return DateTime.tryParse(date) ?? DateTime.now();
@@ -54,22 +50,16 @@ class Book {
       return DateTime.now();
     }
 
-    // 解析分类
-    BookCategory? category;
-    if (json['Category'] is Map) {
-      category = BookCategory.fromJson(json['Category']);
-    }
-
     return Book(
-      id: json['Id'] as int? ?? 0,
-      title: json['Title'] as String? ?? 'Unknown',
-      cover: json['Cover'] as String? ?? '',
-      author: json['Author'] as String? ?? 'Unknown', // 可能在 root 或 'User' 对象中
-      lastUpdatedAt: parseDate(json['LastUpdatedAt']),
-      userName: json['UserName'] as String?,
-      level: json['Level'] as int?,
-      interiorLevel: json['InteriorLevel'] as int?,
-      category: category,
+      id: int.tryParse(json['id']?.toString() ?? '0') ?? 0,
+      title: json['bookName'] as String? ?? 'Unknown',
+      cover: json['picUrl'] as String? ?? '',
+      author: json['authorName'] as String? ?? 'Unknown',
+      lastUpdatedAt: parseDate(json['lastIndexUpdateTime']),
+      userName: null,
+      level: null,
+      interiorLevel: null,
+      category: null,
     );
   }
 }

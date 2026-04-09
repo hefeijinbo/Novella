@@ -445,7 +445,7 @@ class SignalRService {
     await _waitForForegroundRecovery();
 
     developer.log(
-      'invoke($methodName) - state: ${_hubConnection?.state}',
+      'invoke($methodName) args: $args  state: ${_hubConnection?.state}',
       name: 'SIGNALR',
     );
 

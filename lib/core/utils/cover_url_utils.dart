@@ -77,4 +77,25 @@ class CoverUrlUtils {
     }
     return value;
   }
+
+  /// 检查是否是豆瓣图片链接
+  static bool isDoubanImage(String? url) {
+    if (url == null || url.isEmpty) return false;
+    return url.contains('doubanio.com');
+  }
+
+  /// 获取图片请求的 Headers
+  ///
+  /// 豆瓣图片需要设置 Referer 头才能访问
+  static Map<String, String>? getImageHeaders(String? url) {
+    if (isDoubanImage(url)) {
+      return {
+        'Referer': 'https://book.douban.com',
+        "User-Agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
+      };
+    }
+    return null;
+  }
 }

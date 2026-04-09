@@ -1,4 +1,6 @@
+import 'package:dio/dio.dart';
 import 'package:logging/logging.dart';
+import 'package:novella/core/network/api_client.dart';
 import 'package:novella/core/network/request_queue.dart';
 import 'package:novella/core/network/signalr_service.dart';
 import 'package:novella/data/models/book.dart';
@@ -7,6 +9,7 @@ import 'package:novella/features/book/book_detail_page.dart';
 
 class BookService {
   static final Logger _logger = Logger('BookService');
+  final ApiClient _apiClient = ApiClient();
   final SignalRService _signalRService = SignalRService();
   final BookCoverHintService _bookCoverHintService = BookCoverHintService();
 
@@ -63,33 +66,43 @@ class BookService {
     RequestPriority priority = RequestPriority.normal,
   }) async {
     try {
-      final result = await _signalRService.invoke<Map<dynamic, dynamic>>(
-        'GetBookList',
-        requestScope: requestScope,
-        priority: priority,
-        args: [
-          {
-            'Page': page,
-            'Size': size,
-            'Order': order,
-            'IgnoreJapanese': ignoreJapanese,
-            'IgnoreAI': ignoreAI,
-          },
-          {'UseGzip': true},
-        ],
+      final response = await _apiClient.dio.get(
+        '/book/searchByPage',
+        queryParameters: {
+          'curr': page,
+          'limit': size,
+          'sort': order == 'latest' ? 'last_index_update_time' : order,
+        },
       );
 
-      final List<dynamic> data = result['Data'] ?? [];
-      final int totalPages = result['TotalPages'] ?? 0;
+      if (response.statusCode == 200) {
+        final data = response.data;
+        if (data is Map) {
+          final code = data['code'];
+          if (code == 200) {
+            final pageData = data['data'];
+            if (pageData is Map) {
+              final List<dynamic> list = pageData['list'] ?? [];
+              final int total = int.tryParse(pageData['total']?.toString() ?? '0') ?? 0;
+              final totalPages = (total / size).ceil();
 
-      final books = data.map((e) => Book.fromJson(e)).toList();
-      _bookCoverHintService.rememberBooks(books);
+              final books = list.map((e) => Book.fromJson(e)).toList();
+              _bookCoverHintService.rememberBooks(books);
 
-      return SearchResult(
-        books: books,
-        totalPages: totalPages,
-        currentPage: page,
-      );
+              return SearchResult(
+                books: books,
+                totalPages: totalPages,
+                currentPage: page,
+              );
+            }
+          }
+        }
+      }
+      throw Exception('获取书籍列表失败');
+    } on DioException catch (e) {
+      if (isRequestCancelledError(e)) rethrow;
+      _logger.severe('Failed to get book list: ${e.message}');
+      rethrow;
     } catch (e) {
       if (isRequestCancelledError(e)) rethrow;
       _logger.severe('Failed to get book list: $e');
