@@ -157,25 +157,66 @@ class BookService {
   }
 
   /// 获取详细书籍信息（含章节）
-  /// 参考 services/book/index.ts
+  /// 使用 novel-front 的 REST API
   Future<BookInfo> getBookInfo(
     int id, {
     String? requestScope,
     RequestPriority priority = RequestPriority.normal,
   }) async {
     try {
-      final result = await _signalRService.invoke<Map<dynamic, dynamic>>(
-        'GetBookInfo',
-        requestScope: requestScope,
-        priority: priority,
-        args: [
-          {'Id': id},
-          {'UseGzip': true},
-        ],
+      // 1. 获取书籍详情
+      final bookResponse = await _apiClient.dio.get(
+        '/book/queryBookDetail/$id',
       );
 
-      _logger.info('Got book info for id=$id');
-      return BookInfo.fromJson(result);
+      if (bookResponse.statusCode != 200 || bookResponse.data['code'] != 200) {
+        throw Exception('获取书籍详情失败');
+      }
+
+      final bookData = bookResponse.data['data'] as Map<String, dynamic>;
+      final bookInfo = BookInfo.fromJson(bookData);
+
+      // 2. 获取章节列表（默认获取前100章，按序号升序）
+      final chaptersResponse = await _apiClient.dio.get(
+        '/book/queryIndexList',
+        queryParameters: {
+          'bookId': id,
+          'curr': 1,
+          'limit': 100,
+          'orderBy': 'index_num asc',
+        },
+      );
+
+      if (chaptersResponse.statusCode == 200 &&
+          chaptersResponse.data['code'] == 200) {
+        final pageData = chaptersResponse.data['data'];
+        if (pageData is Map) {
+          final List<dynamic> chapterList = pageData['list'] ?? [];
+          final chapters = chapterList
+              .map((e) => ChapterInfo.fromJson(e as Map<String, dynamic>))
+              .toList();
+
+          // 返回包含章节的完整书籍信息
+          return BookInfo(
+            id: bookInfo.id,
+            title: bookInfo.title,
+            cover: bookInfo.cover,
+            author: bookInfo.author,
+            introduction: bookInfo.introduction,
+            lastUpdatedAt: bookInfo.lastUpdatedAt,
+            lastUpdatedChapter: bookInfo.lastUpdatedChapter,
+            favorite: bookInfo.favorite,
+            views: bookInfo.views,
+            canEdit: bookInfo.canEdit,
+            chapters: chapters,
+            user: bookInfo.user,
+            serverReadPosition: bookInfo.serverReadPosition,
+          );
+        }
+      }
+
+      _logger.info('Got book info for id=$id with ${bookInfo.chapters.length} chapters');
+      return bookInfo;
     } catch (e) {
       if (isRequestCancelledError(e)) rethrow;
       _logger.severe('Failed to get book info: $e');
@@ -184,28 +225,46 @@ class BookService {
   }
 
   /// 获取指定周期的排行榜
-  /// 参考 services/book/index.ts
-  /// [days]: 1=日榜, 7=周榜, 31=月榜
+  /// 使用 novel-front 的 REST API
+  /// [days]: 1=日榜, 7=周榜, 31=月榜 (novel-front 不支持天数，统一返回总榜)
   Future<List<Book>> getRank(
     int days, {
     String? requestScope,
     RequestPriority priority = RequestPriority.normal,
   }) async {
     try {
-      final result = await _signalRService.invoke<List<dynamic>>(
-        'GetRank',
-        requestScope: requestScope,
-        priority: priority,
-        args: [
-          {'Days': days},
-          {'UseGzip': true},
-        ],
+      // novel-front 的 type 参数:
+      // 0: 点击榜, 1: 新书榜, 2: 更新榜, 3: 评论榜
+      // 这里将 days 映射为 type:
+      // days <= 1 -> type 0 (点击榜)
+      // days <= 7 -> type 2 (更新榜)
+      // days > 7 -> type 1 (新书榜)
+      final int type;
+      if (days <= 1) {
+        type = 0; // 点击榜
+      } else if (days <= 7) {
+        type = 2; // 更新榜
+      } else {
+        type = 1; // 新书榜
+      }
+
+      final response = await _apiClient.dio.get(
+        '/book/listRank',
+        queryParameters: {
+          'type': type,
+          'limit': 30, // 默认返回30条
+        },
       );
 
-      _logger.info('Got ${result.length} books from ranking (days=$days)');
-      final books = result.map((e) => Book.fromJson(e)).toList();
-      _bookCoverHintService.rememberBooks(books);
-      return books;
+      if (response.statusCode == 200 && response.data['code'] == 200) {
+        final List<dynamic> dataList = response.data['data'] ?? [];
+        final books = dataList.map((e) => Book.fromJson(e as Map<String, dynamic>)).toList();
+        _bookCoverHintService.rememberBooks(books);
+        _logger.info('Got ${books.length} books from ranking (type=$type)');
+        return books;
+      }
+
+      throw Exception('获取排行榜失败');
     } catch (e) {
       if (isRequestCancelledError(e)) rethrow;
       _logger.severe('Failed to get ranking: $e');

@@ -218,38 +218,34 @@ class BookInfo {
     this.serverReadPosition,
   });
 
-  factory BookInfo.fromJson(Map<dynamic, dynamic> json) {
-    final book = json['Book'] as Map<dynamic, dynamic>? ?? json;
-    final chapterList =
-        (book['Chapter'] as List?)
-            ?.map((e) => ChapterInfo.fromJson(e as Map<dynamic, dynamic>))
-            .toList() ??
-        [];
-
-    // 解析服务端返回的阅读进度
-    ServerReadPosition? readPos;
-    final posData = json['ReadPosition'];
-    if (posData != null && posData is Map) {
-      readPos = ServerReadPosition.fromJson(posData);
-    }
-
+  factory BookInfo.fromJson(Map<String, dynamic> json) {
+    // novel-front 返回的 Book 实体字段映射
     return BookInfo(
-      id: book['Id'] as int? ?? 0,
-      title: book['Title'] as String? ?? 'Unknown',
-      cover: book['Cover'] as String? ?? '',
-      author: book['Author'] as String? ?? 'Unknown',
-      introduction: book['Introduction'] as String? ?? '',
-      lastUpdatedAt:
-          DateTime.tryParse(book['LastUpdatedAt']?.toString() ?? '') ??
-          DateTime.now(),
-      lastUpdatedChapter: book['LastUpdatedChapter'] as String?,
-      favorite: book['Favorite'] as int? ?? 0,
-      views: book['Views'] as int? ?? 0,
-      canEdit: book['CanEdit'] as bool? ?? false,
-      chapters: chapterList,
-      user: book['User'] != null ? UserInfo.fromJson(book['User']) : null,
-      serverReadPosition: readPos,
+      id: int.tryParse(json['id'] as String? ?? "0") ?? 0,
+      title: json['bookName'] as String? ?? 'Unknown',
+      cover: json['picUrl'] as String? ?? '',
+      author: json['authorName'] as String? ?? 'Unknown',
+      introduction: json['bookDesc'] as String? ?? '',
+      lastUpdatedAt: _parseDate(json['lastIndexUpdateTime']),
+      lastUpdatedChapter: json['lastIndexName'] as String?,
+      favorite: 0, // novel-front 无此字段，默认0
+      views: int.tryParse(json['visitCount'] as String? ?? "0")?.toInt() ?? 0,
+      canEdit: false, // 需要根据用户权限判断
+      chapters: [], // 章节列表需要单独调用 queryIndexList 接口
+      user: null,
+      serverReadPosition: null,
     );
+  }
+
+  static DateTime _parseDate(dynamic dateValue) {
+    if (dateValue == null) return DateTime.now();
+    if (dateValue is String) {
+      return DateTime.tryParse(dateValue) ?? DateTime.now();
+    }
+    if (dateValue is num) {
+      return DateTime.fromMillisecondsSinceEpoch(dateValue.toInt());
+    }
+    return DateTime.now();
   }
 }
 
@@ -271,14 +267,37 @@ class ServerReadPosition {
 class ChapterInfo {
   final int id;
   final String title;
+  final int? indexNum; // 章节序号
+  final bool? isVip; // 是否VIP章节
+  final DateTime? updateTime; // 更新时间
 
-  ChapterInfo({required this.id, required this.title});
+  ChapterInfo({
+    required this.id,
+    required this.title,
+    this.indexNum,
+    this.isVip,
+    this.updateTime,
+  });
 
-  factory ChapterInfo.fromJson(Map<dynamic, dynamic> json) {
+  factory ChapterInfo.fromJson(Map<String, dynamic> json) {
     return ChapterInfo(
-      id: json['Id'] as int? ?? 0,
-      title: json['Title'] as String? ?? '',
+      id: int.parse(json['id'] as String? ?? "") ?? 0,
+      title: json['indexName'] as String? ?? '',
+      indexNum: (json['indexNum'] as num?)?.toInt(),
+      isVip: (json['isVip'] as num?)?.toInt() == 1,
+      updateTime: _parseDate(json['updateTime']),
     );
+  }
+
+  static DateTime? _parseDate(dynamic dateValue) {
+    if (dateValue == null) return null;
+    if (dateValue is String) {
+      return DateTime.tryParse(dateValue);
+    }
+    if (dateValue is num) {
+      return DateTime.fromMillisecondsSinceEpoch(dateValue.toInt());
+    }
+    return null;
   }
 }
 

@@ -29,7 +29,7 @@ class AuthService {
   DateTime? _lastRefreshTime;
   // Web 侧默认 session token validity 为 30s（见 VUE_SESSION_TOKEN_VALIDITY）
   // 这里必须与服务端/原实现接近，否则 iOS 后台较久回来会拿着“自以为有效”的旧 token 触发无Token/unauthorized。
-  static const _tokenValidity = Duration(seconds: 30);
+  static const _tokenValidity = Duration(seconds: 600);
 
   // 预过期阈值：即将过期时（例如剩余 <= 5s）也视为需要刷新
   static const _preExpiryThreshold = Duration(seconds: 5);
