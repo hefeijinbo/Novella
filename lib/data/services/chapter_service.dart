@@ -1,5 +1,6 @@
 import 'dart:developer' as developer;
 import 'package:logging/logging.dart';
+import 'package:novella/core/network/api_client.dart';
 import 'package:novella/core/network/signalr_service.dart';
 
 class ChapterContent {
@@ -43,65 +44,55 @@ class ChapterService {
   /// 用途：强制 Flutter 在任意位置断行。
   static const bool _kEnableZeroWidthSpaceInjection = true;
 
+  final ApiClient _apiClient = ApiClient();
   final SignalRService _signalRService = SignalRService();
 
   /// 获取章节内容
-  /// 参考 services/chapter/index.ts
+  /// 使用 novel-front 的 REST API
   Future<ChapterContent> getNovelContent(
     int bid,
     int sortNum, {
     String? convert,
   }) async {
     try {
-      // Web 参考包含 UseGzip
-      final result = await _signalRService.invoke<Map<dynamic, dynamic>>(
-        'GetNovelContent',
-        args: [
-          {
-            'Bid': bid,
-            'SortNum': sortNum,
-            if (convert != null) 'Convert': convert,
-          },
-          // 选项
-          {'UseGzip': true},
-        ],
+      // 使用 bookId + indexNum 查询章节内容
+      // novel-front 支持通过 indexNum 自动查找 bookIndexId
+      final response = await _apiClient.dio.get(
+        '/book/queryBookContent',
+        queryParameters: {
+          'bookId': bid,
+          'indexNum': sortNum, // 使用 indexNum 参数
+        },
       );
 
+      if (response.statusCode != 200 || response.data['code'] != 200) {
+        throw Exception('获取章节内容失败');
+      }
+
+      final chapterData = response.data['data'] as Map<String, dynamic>;
+      
       // 调试：打印原始章节数据
       developer.log(
-        'Raw result keys: ${result.keys.toList()}',
+        'Chapter data keys: ${chapterData.keys.toList()}',
         name: 'CHAPTER',
       );
-      if (result['Chapter'] != null) {
-        final chapterJson = result['Chapter'];
-        developer.log(
-          'Chapter keys: ${chapterJson.keys.toList()}',
-          name: 'CHAPTER',
-        );
-        developer.log('Font value: ${chapterJson['Font']}', name: 'CHAPTER');
+      developer.log('Font value: null', name: 'CHAPTER'); // novel-front 无 Font 字段
 
-        // 提取阅读位置
-        String? position;
-        final readPos = result['ReadPosition'];
-        if (readPos != null && readPos is Map) {
-          position = readPos['Position'] as String?;
-          developer.log(
-            'ReadPosition: ChapterId=${readPos['ChapterId']}, Position=$position',
-            name: 'CHAPTER',
-          );
-        }
-
-        // 处理内容：必要时注入零宽空格以解决换行问题
-        String content = chapterJson['Content'] as String? ?? '';
-        if (_kEnableZeroWidthSpaceInjection && content.isNotEmpty) {
-          content = _injectZeroWidthSpace(content);
-          // 更新 JSON 中的 Content
-          chapterJson['Content'] = content;
-        }
-
-        return ChapterContent.fromJson(chapterJson, position: position);
+      // 处理内容：必要时注入零宽空格以解决换行问题
+      String content = chapterData['content'] as String? ?? '';
+      if (_kEnableZeroWidthSpaceInjection && content.isNotEmpty) {
+        content = _injectZeroWidthSpace(content);
       }
-      throw Exception('Chapter not found in response');
+
+      // 转换为 ChapterContent 对象
+      return ChapterContent(
+        id: chapterData['id'] as int? ?? 0,
+        title: chapterData['title'] as String? ?? 'Unknown Chapter',
+        content: content,
+        fontUrl: null, // novel-front 无此字段
+        sortNum: chapterData['sortNum'] as int? ?? 0,
+        serverPosition: null, // novel-front 无此字段
+      );
     } catch (e) {
       _logger.severe('Failed to get novel content: $e');
       rethrow;
