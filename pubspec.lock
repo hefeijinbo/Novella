@@ -614,10 +614,10 @@ packages:
     dependency: "direct main"
     description:
       name: flutter_widget_from_html
-      sha256: "483a45db08211c4639b2634c09755d2a0a5c48675a743937f8400a8ff2fc7cbf"
+      sha256: "4fa9a0d34df0a40ac8dd20765dc83bbd8f36ceecfffa2a72a7ab178548804a04"
       url: "https://pub-web.flutter-io.cn"
     source: hosted
-    version: "0.16.1"
+    version: "0.17.2"
   flutter_widget_from_html_core:
     dependency: transitive
     description:

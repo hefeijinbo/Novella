@@ -75,22 +75,22 @@ class ReadingProgressService {
     required int chapterId,
     required String xPath, // XPath 精确位置
   }) async {
-    try {
-      // Web 端调用包含选项，必须包含！
-      await _signalRService.invoke(
-        'SaveReadPosition',
-        args: [
-          {'Bid': bookId, 'Cid': chapterId, 'XPath': xPath},
-          {'UseGzip': true}, // 选项（必须！）
-        ],
-      );
-      _logger.info(
-        'Saved reading position: book=$bookId, chapter=$chapterId, xPath=$xPath',
-      );
-    } catch (e) {
-      _logger.warning('Failed to save position to server: $e');
-      // 服务端失败仍保存本地
-    }
+    // try {
+    //   // Web 端调用包含选项，必须包含！
+    //   await _signalRService.invoke(
+    //     'SaveReadPosition',
+    //     args: [
+    //       {'Bid': bookId, 'Cid': chapterId, 'XPath': xPath},
+    //       {'UseGzip': true}, // 选项（必须！）
+    //     ],
+    //   );
+    //   _logger.info(
+    //     'Saved reading position: book=$bookId, chapter=$chapterId, xPath=$xPath',
+    //   );
+    // } catch (e) {
+    //   _logger.warning('Failed to save position to server: $e');
+    //   // 服务端失败仍保存本地
+    // }
 
     // 本地备份
     await _saveLocalPosition(bookId, chapterId, xPath);

@@ -86,7 +86,7 @@ class ChapterService {
 
       // 转换为 ChapterContent 对象
       return ChapterContent(
-        id: chapterData['id'] as int? ?? 0,
+        id: int.parse(chapterData['id'] as String? ?? '0') ?? 0,
         title: chapterData['title'] as String? ?? 'Unknown Chapter',
         content: content,
         fontUrl: null, // novel-front 无此字段

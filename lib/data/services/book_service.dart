@@ -182,7 +182,7 @@ class BookService {
         queryParameters: {
           'bookId': id,
           'curr': 1,
-          'limit': 100,
+          'limit': 1000,
           'orderBy': 'index_num asc',
         },
       );
