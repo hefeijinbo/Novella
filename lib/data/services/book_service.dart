@@ -126,26 +126,20 @@ class BookService {
       final chunk = ids.sublist(i, end);
 
       try {
-        final result = await _signalRService.invoke<List<dynamic>>(
-          'GetBookListByIds',
-          requestScope: requestScope,
-          priority: priority,
-          args: [
-            // Request params
-            {'Ids': chunk},
-            // 选项
-            {'UseGzip': true},
-          ],
+        // 使用 novel-front 的 REST API
+        final response = await _apiClient.dio.post(
+          '/book/queryBookListByIds',
+          data: chunk,
         );
 
-        // 过滤 null 元素（服务端对权限受限书籍可能返回 null）
-        final books =
-            result
-                .whereType<Map<dynamic, dynamic>>()
-                .map((e) => Book.fromJson(e))
-                .toList();
-        _bookCoverHintService.rememberBooks(books);
-        allBooks.addAll(books);
+        if (response.statusCode == 200 && response.data['code'] == 200) {
+          final List<dynamic> dataList = response.data['data'] ?? [];
+          final books = dataList
+              .map((e) => Book.fromJson(e as Map<String, dynamic>))
+              .toList();
+          _bookCoverHintService.rememberBooks(books);
+          allBooks.addAll(books);
+        }
       } catch (e) {
         if (isRequestCancelledError(e)) rethrow;
         _logger.severe('Failed to get books chunk $i-$end: $e');
@@ -273,7 +267,7 @@ class BookService {
   }
 
   /// 关键词搜索书籍
-  /// 参考 services/book/index.ts
+  /// 使用 novel-front 的 REST API
   Future<SearchResult> searchBooks(
     String keywords, {
     int page = 1,
@@ -282,33 +276,42 @@ class BookService {
     bool ignoreAI = false,
   }) async {
     try {
-      final result = await _signalRService.invoke<Map<dynamic, dynamic>>(
-        'GetBookList',
-        args: [
-          {
-            'Page': page,
-            'Size': size,
-            'KeyWords': keywords,
-            'IgnoreJapanese': ignoreJapanese,
-            'IgnoreAI': ignoreAI,
-          },
-          {'UseGzip': true},
-        ],
+      // 使用 novel-front 的 REST API
+      final response = await _apiClient.dio.get(
+        '/book/searchByPage',
+        queryParameters: {
+          'keyword': keywords,
+          'curr': page,
+          'limit': size,
+        },
       );
 
-      final List<dynamic> data = result['Data'] ?? [];
-      final int totalPages = result['TotalPages'] ?? 0;
+      if (response.statusCode == 200 && response.data['code'] == 200) {
+        final pageData = response.data['data'];
+        if (pageData is Map) {
+          final List<dynamic> dataList = pageData['list'] ?? [];
+          final int total = pageData['total'] ?? 0;
+          final int totalPages = (total / size).ceil();
 
-      _logger.info(
-        'Search "$keywords" page $page: ${data.length} results, $totalPages pages',
-      );
+          final books = dataList
+              .map((e) => Book.fromJson(e as Map<String, dynamic>))
+              .toList();
 
-      return SearchResult(
-        books: data.map((e) => Book.fromJson(e)).toList(),
-        totalPages: totalPages,
-        currentPage: page,
-      );
+          _logger.info(
+            'Search "$keywords" page $page: ${books.length} results, $totalPages pages',
+          );
+
+          return SearchResult(
+            books: books,
+            totalPages: totalPages,
+            currentPage: page,
+          );
+        }
+      }
+
+      throw Exception('搜索失败');
     } catch (e) {
+      if (isRequestCancelledError(e)) rethrow;
       _logger.severe('Failed to search books: $e');
       rethrow;
     }
