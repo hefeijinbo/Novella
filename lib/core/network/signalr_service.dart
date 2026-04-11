@@ -153,6 +153,7 @@ class SignalRService {
 
   /// 停止当前连接
   Future<void> stop() async {
+    return;
     final existingConnection = _hubConnection;
     if (existingConnection == null) {
       return;
@@ -282,6 +283,7 @@ class SignalRService {
   }
 
   Future<void> init() async {
+    return;
     developer.log(
       'init() - current state: ${_hubConnection?.state}',
       name: 'SIGNALR',
