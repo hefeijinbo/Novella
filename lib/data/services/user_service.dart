@@ -687,15 +687,26 @@ class UserService extends ChangeNotifier {
 
     _pendingShelfSync = _pendingShelfSync.catchError((_) {}).then((_) async {
       try {
-        await _signalRService.invoke(
-          'SaveBookShelf',
-          args: <Object>[
-            {'data': snapshot, 'ver': '20220211'},
-            {'UseGzip': true},
-          ],
+        // 提取所有书籍类型的 ID（novel-front 不支持文件夹）
+        final bookIds = snapshot
+            .where((item) => _itemType(item) == 'BOOK')
+            .map((item) => int.tryParse(_itemId(item) ?? ''))
+            .whereType<int>()
+            .toList();
+
+        // 使用 novel-front 的 REST API 批量同步书架
+        final response = await _apiClient.dio.post(
+          '/user/syncBookShelf',
+          data: bookIds,
         );
-        _logger.info('Shelf synced to server');
+
+        if (response.statusCode == 200 && response.data['code'] == 200) {
+          _logger.info('Shelf synced to server with ${bookIds.length} books');
+        } else {
+          _logger.warning('Failed to sync shelf: ${response.data}');
+        }
       } catch (e) {
+        if (isRequestCancelledError(e)) rethrow;
         _logger.severe('Failed to sync shelf to server: $e');
       }
     });

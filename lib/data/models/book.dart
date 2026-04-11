@@ -81,7 +81,7 @@ class Chapter {
 enum ShelfItemType { book, folder }
 
 class ShelfItem {
-  final dynamic id; // int(书) 或 String(文件夹)
+  final int id; // int(书) 或 String(文件夹)
   final ShelfItemType type;
   final String title;
   final List<String> parents;
@@ -103,7 +103,7 @@ class ShelfItem {
         typeStr == 'FOLDER' ? ShelfItemType.folder : ShelfItemType.book;
 
     return ShelfItem(
-      id: json['id'] ?? json['Id'],
+      id: int.parse(json['id'] ?? json['Id']),
       type: type,
       title: (json['title'] ?? json['Title']) as String? ?? '',
       parents:

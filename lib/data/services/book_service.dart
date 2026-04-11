@@ -290,7 +290,7 @@ class BookService {
         final pageData = response.data['data'];
         if (pageData is Map) {
           final List<dynamic> dataList = pageData['list'] ?? [];
-          final int total = pageData['total'] ?? 0;
+          final int total = int.parse(pageData['total'] as String? ?? '0');
           final int totalPages = (total / size).ceil();
 
           final books = dataList

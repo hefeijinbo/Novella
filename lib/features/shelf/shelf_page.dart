@@ -299,7 +299,7 @@ class ShelfPageState extends ConsumerState<ShelfPage> {
         _selectedFilter == 0
             ? rootItems
             : allShelfBookItems
-                .where((item) => _markedBookIds.contains(item.id as int))
+                .where((item) => _markedBookIds.contains(item.id))
                 .toList(growable: false);
     final initialDetailIds = _collectInitialDetailIds(filteredItems);
     final needsVisibleDetails = initialDetailIds.isNotEmpty;
@@ -307,7 +307,7 @@ class ShelfPageState extends ConsumerState<ShelfPage> {
     final visibleBookIds =
         (_selectedFilter == 0 ? rootItems : filteredItems)
             .where((item) => item.type == ShelfItemType.book)
-            .map((item) => item.id as int)
+            .map((item) => item.id)
             .toSet();
     final visibleFolderIds =
         _selectedFilter == 0
@@ -394,7 +394,7 @@ class ShelfPageState extends ConsumerState<ShelfPage> {
     final detailIds = <int>{};
     for (final item in items.take(12)) {
       if (item.type == ShelfItemType.book) {
-        final bookId = item.id as int;
+        final bookId = item.id;
         if (!_bookDetails.containsKey(bookId)) {
           detailIds.add(bookId);
         }
