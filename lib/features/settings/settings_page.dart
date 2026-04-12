@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:novella/core/services/kokoro_tts.dart';
 
 import 'package:novella/features/settings/settings_provider.dart';
 import 'package:novella/features/settings/pages/reading_settings_page.dart';
@@ -156,6 +157,16 @@ class SettingsPage extends ConsumerWidget {
                         builder: (context) => const AboutSettingsPage(),
                       ),
                     );
+                  },
+                ),
+
+                ListTile(
+                  leading: const Icon(Icons.info_outline),
+                  title: const Text('测试'),
+                  subtitle: const Text('查看更多信息'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    KokoroTTS.instance.speak('你好,这是一个测试', voice: 'zf_xiaoxiao', lang: 'cmn');
                   },
                 ),
               ]),

@@ -629,33 +629,25 @@ class UserService extends ChangeNotifier {
 
   Future<List<int>> getReadHistory() async {
     try {
-      final result = await _signalRService.invoke<Map<dynamic, dynamic>>(
-        'GetReadHistory',
-        args: <Object>[
-          {},
-          {'UseGzip': true},
-        ],
+      // 使用 novel-front 的 REST API
+      final response = await _apiClient.dio.get(
+        '/user/getReadHistoryBookIds',
       );
 
-      _logger.info('GetReadHistory raw result: $result');
-
-      if (result.isEmpty) {
-        _logger.info('Empty read history from server');
-        return [];
+      if (response.statusCode == 200 && response.data['code'] == 200) {
+        final List<dynamic> bookIdList = response.data['data'] ?? [];
+        final bookIds = bookIdList
+            .map((id) => (id as num).toInt())
+            .toList();
+        
+        _logger.info('Got ${bookIds.length} books in read history');
+        return bookIds;
       }
 
-      final novelList = result['Novel'];
-      if (novelList == null || novelList is! List) {
-        _logger.warning(
-          'Unexpected history data type: ${novelList?.runtimeType}',
-        );
-        return [];
-      }
-
-      final bookIds = novelList.cast<int>().toList();
-      _logger.info('Got ${bookIds.length} books in read history');
-      return bookIds;
+      _logger.warning('Failed to get read history: ${response.data}');
+      return [];
     } catch (e) {
+      if (isRequestCancelledError(e)) rethrow;
       _logger.severe('Failed to get read history: $e');
       return [];
     }
@@ -663,17 +655,21 @@ class UserService extends ChangeNotifier {
 
   Future<bool> clearReadHistory() async {
     try {
-      await _signalRService.invoke(
-        'ClearReadHistory',
-        args: [
-          {},
-          {'UseGzip': true},
-        ],
+      // 使用 novel-front 的 REST API
+      final response = await _apiClient.dio.delete(
+        '/user/clearReadHistory',
       );
-      _logger.info('Read history cleared');
-      notifyListeners();
-      return true;
+
+      if (response.statusCode == 200 && response.data['code'] == 200) {
+        _logger.info('Read history cleared');
+        notifyListeners();
+        return true;
+      }
+
+      _logger.warning('Failed to clear read history: ${response.data}');
+      return false;
     } catch (e) {
+      if (isRequestCancelledError(e)) rethrow;
       _logger.severe('Failed to clear read history: $e');
       return false;
     }
