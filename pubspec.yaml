@@ -81,6 +81,9 @@ dependencies:
   flutter_quill: ^11.5.0
   flutter_quill_delta_from_html: ^1.5.2
   vsc_quill_delta_to_html: ^1.0.5
+  sherpa_onnx: ^1.12.36
+  audioplayers: ^6.6.0
+  media_kit:
 
 dev_dependencies:
   flutter_test:
@@ -101,7 +104,11 @@ dev_dependencies:
 flutter:
 
   # The following line ensures that the Material Icons font is
-  # included with your application, so that you can use the icons in
+  assets:
+    - assets/vits-melo-tts-zh_en/
+    - assets/vits-melo-tts-zh_en/dict/
+    - assets/vits-melo-tts-zh_en/dict/pos_dict/
+
   # the material Icons class.
   uses-material-design: true
 

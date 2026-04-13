@@ -56,6 +56,62 @@ packages:
       url: "https://pub-web.flutter-io.cn"
     source: hosted
     version: "0.2.3"
+  audioplayers:
+    dependency: "direct main"
+    description:
+      name: audioplayers
+      sha256: a72dd459d1a48f61a6fb9c0134dba26597c9236af40639ff0eb70eb4e0baab70
+      url: "https://pub-web.flutter-io.cn"
+    source: hosted
+    version: "6.6.0"
+  audioplayers_android:
+    dependency: transitive
+    description:
+      name: audioplayers_android
+      sha256: "60a6728277228413a85755bd3ffd6fab98f6555608923813ce383b190a360605"
+      url: "https://pub-web.flutter-io.cn"
+    source: hosted
+    version: "5.2.1"
+  audioplayers_darwin:
+    dependency: transitive
+    description:
+      name: audioplayers_darwin
+      sha256: c994b3bb3a921e4904ac40e013fbc94488e824fd7c1de6326f549943b0b44a91
+      url: "https://pub-web.flutter-io.cn"
+    source: hosted
+    version: "6.4.0"
+  audioplayers_linux:
+    dependency: transitive
+    description:
+      name: audioplayers_linux
+      sha256: f75bce1ce864170ef5e6a2c6a61cd3339e1a17ce11e99a25bae4474ea491d001
+      url: "https://pub-web.flutter-io.cn"
+    source: hosted
+    version: "4.2.1"
+  audioplayers_platform_interface:
+    dependency: transitive
+    description:
+      name: audioplayers_platform_interface
+      sha256: "0e2f6a919ab56d0fec272e801abc07b26ae7f31980f912f24af4748763e5a656"
+      url: "https://pub-web.flutter-io.cn"
+    source: hosted
+    version: "7.1.1"
+  audioplayers_web:
+    dependency: transitive
+    description:
+      name: audioplayers_web
+      sha256: faa8fa6587f996a6f604433b53af44c57a1407d4fe8dff5766cf63d6875e8de9
+      url: "https://pub-web.flutter-io.cn"
+    source: hosted
+    version: "5.2.0"
+  audioplayers_windows:
+    dependency: transitive
+    description:
+      name: audioplayers_windows
+      sha256: bafff2b38b6f6d331887558ba6e0a01c9c208d9dbb3ad0005234db065122a734
+      url: "https://pub-web.flutter-io.cn"
+    source: hosted
+    version: "4.3.0"
   battery_plus:
     dependency: "direct main"
     description:
@@ -746,6 +802,14 @@ packages:
       url: "https://pub-web.flutter-io.cn"
     source: hosted
     version: "4.1.2"
+  image:
+    dependency: transitive
+    description:
+      name: image
+      sha256: f9881ff4998044947ec38d098bc7c8316ae1186fa786eddffdb867b9bc94dfce
+      url: "https://pub-web.flutter-io.cn"
+    source: hosted
+    version: "4.8.0"
   intl:
     dependency: transitive
     description:
@@ -882,6 +946,14 @@ packages:
       url: "https://pub-web.flutter-io.cn"
     source: hosted
     version: "0.11.1"
+  media_kit:
+    dependency: "direct main"
+    description:
+      name: media_kit
+      sha256: ae9e79597500c7ad6083a3c7b7b7544ddabfceacce7ae5c9709b0ec16a5d6643
+      url: "https://pub-web.flutter-io.cn"
+    source: hosted
+    version: "1.2.6"
   message_pack_dart:
     dependency: transitive
     description:
@@ -1202,6 +1274,14 @@ packages:
       url: "https://pub-web.flutter-io.cn"
     source: hosted
     version: "0.28.0"
+  safe_local_storage:
+    dependency: transitive
+    description:
+      name: safe_local_storage
+      sha256: "287ea1f667c0b93cdc127dccc707158e2d81ee59fba0459c31a0c7da4d09c755"
+      url: "https://pub-web.flutter-io.cn"
+    source: hosted
+    version: "2.0.3"
   screen_retriever:
     dependency: transitive
     description:
@@ -1354,6 +1434,54 @@ packages:
       url: "https://pub-web.flutter-io.cn"
     source: hosted
     version: "3.0.0"
+  sherpa_onnx:
+    dependency: "direct main"
+    description:
+      name: sherpa_onnx
+      sha256: c10a1052bf03b9e68562e5be7d3a60568738c8356f3607012f0260f88ea11f08
+      url: "https://pub-web.flutter-io.cn"
+    source: hosted
+    version: "1.12.36"
+  sherpa_onnx_android:
+    dependency: transitive
+    description:
+      name: sherpa_onnx_android
+      sha256: "03a70665e83c026ccf4d853fe87d011321bc66810c5ea108ea08a128f95d862a"
+      url: "https://pub-web.flutter-io.cn"
+    source: hosted
+    version: "1.12.36"
+  sherpa_onnx_ios:
+    dependency: transitive
+    description:
+      name: sherpa_onnx_ios
+      sha256: a725a7e14a0be3a6d604902efe12b7c3e8c3190f0506a2635153fc419b4af021
+      url: "https://pub-web.flutter-io.cn"
+    source: hosted
+    version: "1.12.38"
+  sherpa_onnx_linux:
+    dependency: transitive
+    description:
+      name: sherpa_onnx_linux
+      sha256: "608146dfa2b654a7e9b6bd6c76ac407452e141c8326bf13eccd7422189e7cae6"
+      url: "https://pub-web.flutter-io.cn"
+    source: hosted
+    version: "1.12.38"
+  sherpa_onnx_macos:
+    dependency: transitive
+    description:
+      name: sherpa_onnx_macos
+      sha256: "8e2a9825081f21e53a0d94f4b83b15120624980585518feefc577313c9374042"
+      url: "https://pub-web.flutter-io.cn"
+    source: hosted
+    version: "1.12.38"
+  sherpa_onnx_windows:
+    dependency: transitive
+    description:
+      name: sherpa_onnx_windows
+      sha256: fb896256baf0450f9a0919d65ea838d4445be8578f5b567f40fe32130cb9fef3
+      url: "https://pub-web.flutter-io.cn"
+    source: hosted
+    version: "1.12.38"
   signalr_netcore:
     dependency: "direct main"
     description:
@@ -1543,6 +1671,14 @@ packages:
       url: "https://pub-web.flutter-io.cn"
     source: hosted
     version: "1.4.0"
+  universal_platform:
+    dependency: transitive
+    description:
+      name: universal_platform
+      sha256: "64e16458a0ea9b99260ceb5467a214c1f298d647c659af1bff6d3bf82536b1ec"
+      url: "https://pub-web.flutter-io.cn"
+    source: hosted
+    version: "1.1.0"
   upower:
     dependency: transitive
     description:
@@ -1551,6 +1687,14 @@ packages:
       url: "https://pub-web.flutter-io.cn"
     source: hosted
     version: "0.7.0"
+  uri_parser:
+    dependency: transitive
+    description:
+      name: uri_parser
+      sha256: "051c62e5f693de98ca9f130ee707f8916e2266945565926be3ff20659f7853ce"
+      url: "https://pub-web.flutter-io.cn"
+    source: hosted
+    version: "3.0.2"
   url_launcher:
     dependency: "direct main"
     description:
